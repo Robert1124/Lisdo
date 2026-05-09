@@ -95,7 +95,9 @@ const copy = {
     "faq.q3": "截图和图片会上传吗？",
     "faq.a3": "默认策略是本机 Vision OCR，并同步 OCR text 与 metadata；原图默认不通过 iCloud 同步。",
     "faq.q4": "语音和菜单栏捕获都可用了吗？",
-    "faq.a4": "MVP 1 有真实 shell 和产品级 placeholder。真实 voice pipeline 和 Mac screen region capture 属于 MVP 2/3。",
+    "faq.a4": "Mac 菜单栏捕获目前可用。语音捕获暂不可用，会在核心截图/粘贴转 todo 流程稳定后继续开发。",
+    "faq.q5": "现在可以安装 Mac 或 iOS 版本吗？",
+    "faq.a5": "Mac 端已经开源，但还未完成开发，所以暂时没有安装包。完成测试和 debug 后会 release 安装包。iOS 版本也在同步开发，完成后会上传 TestFlight。",
     "footer.copy": "Native AI task inbox for iPhone and Mac. Draft-first by design.",
     "footer.github": "GitHub 仓库"
   },
@@ -195,7 +197,9 @@ const copy = {
     "faq.q3": "Are screenshots and images uploaded?",
     "faq.a3": "The default strategy is local Vision OCR, syncing OCR text and metadata. Original images are not synced through iCloud by default.",
     "faq.q4": "Are voice and menu bar capture ready?",
-    "faq.a4": "MVP 1 includes real shells and product-grade placeholders. Real voice pipeline and Mac screen-region capture belong to MVP 2/3.",
+    "faq.a4": "Mac menu bar capture is available now. Voice capture is not available yet and will continue after the core screenshot/paste-to-todo flow is stable.",
+    "faq.q5": "Can I install the Mac or iOS version now?",
+    "faq.a5": "The Mac app is open source, but it is still in development, so there is no installer package yet. An installer will be released after testing and debugging. The iOS version is also being developed in parallel and will be uploaded to TestFlight when ready.",
     "footer.copy": "Native AI task inbox for iPhone and Mac. Draft-first by design.",
     "footer.github": "GitHub repo"
   }
