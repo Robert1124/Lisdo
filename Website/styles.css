@@ -1058,18 +1058,35 @@ button {
   font-weight: 850;
 }
 
-.faq-item button span:last-child {
+.faq-toggle {
+  position: relative;
   flex: 0 0 auto;
-  display: grid;
+  display: block;
   width: 34px;
   height: 34px;
-  place-items: center;
   border: 1px solid rgba(40, 37, 31, 0.16);
   border-radius: 999px;
   transition: transform 180ms ease;
 }
 
-.faq-item button[aria-expanded="true"] span:last-child {
+.faq-toggle::before,
+.faq-toggle::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 2px;
+  content: "";
+  background: var(--ink-1);
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.faq-toggle::after {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.faq-item button[aria-expanded="true"] .faq-toggle {
   transform: rotate(45deg);
 }
 

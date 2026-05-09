@@ -336,7 +336,7 @@
           <div class="faq-item">
             <button type="button" aria-expanded="true">
               <span data-i18n="faq.q1">AI 会不会直接替我创建待办？</span>
-              <span aria-hidden="true">+</span>
+              <span class="faq-toggle" aria-hidden="true"></span>
             </button>
             <div class="faq-panel">
               <p data-i18n="faq.a1">不会。Lisdo 的产品流要求所有 AI 输出先成为 draft。用户 review、编辑并确认后，才保存为正式 todo。</p>
@@ -345,7 +345,7 @@
           <div class="faq-item">
             <button type="button" aria-expanded="false">
               <span data-i18n="faq.q2">iPhone 和 Mac 如何同步？</span>
-              <span aria-hidden="true">+</span>
+              <span class="faq-toggle" aria-hidden="true"></span>
             </button>
             <div class="faq-panel" hidden>
               <p data-i18n="faq.a2">MVP 1 设计为 SwiftData + CloudKit，同步 categories、captures、drafts、todos 和 pending queue metadata。API keys 和 provider secrets 只保存在本机 Keychain。</p>
@@ -354,7 +354,7 @@
           <div class="faq-item">
             <button type="button" aria-expanded="false">
               <span data-i18n="faq.q3">截图和图片会上传吗？</span>
-              <span aria-hidden="true">+</span>
+              <span class="faq-toggle" aria-hidden="true"></span>
             </button>
             <div class="faq-panel" hidden>
               <p data-i18n="faq.a3">默认策略是本机 Vision OCR，并同步 OCR text 与 metadata；原图默认不通过 iCloud 同步。</p>
@@ -363,7 +363,7 @@
           <div class="faq-item">
             <button type="button" aria-expanded="false">
               <span data-i18n="faq.q4">语音、Share Extension、菜单栏都可用了吗？</span>
-              <span aria-hidden="true">+</span>
+              <span class="faq-toggle" aria-hidden="true"></span>
             </button>
             <div class="faq-panel" hidden>
               <p data-i18n="faq.a4">MVP 1 有真实 shell 和产品级 placeholder。真实 share ingestion、voice pipeline、Mac screen region capture 属于 MVP 2/3。</p>
