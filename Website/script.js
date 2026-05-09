@@ -3,6 +3,7 @@ const copy = {
     "nav.workflow": "工作流",
     "nav.surfaces": "产品界面",
     "nav.faq": "常见问题",
+    "nav.github": "GitHub",
     "nav.cta": "查看流程",
     "hero.title": "杂乱输入，先成草稿",
     "hero.subtitle": "Lisdo 是 iPhone 和 Mac 上的 AI task inbox。复制文字、导入截图、语音记录或从分享面板捕获内容，先生成草稿，再由你确认保存为分类待办。",
@@ -96,12 +97,14 @@ const copy = {
     "faq.a3": "默认策略是本机 Vision OCR，并同步 OCR text 与 metadata；原图默认不通过 iCloud 同步。",
     "faq.q4": "语音、Share Extension、菜单栏都可用了吗？",
     "faq.a4": "MVP 1 有真实 shell 和产品级 placeholder。真实 share ingestion、voice pipeline、Mac screen region capture 属于 MVP 2/3。",
-    "footer.copy": "Native AI task inbox for iPhone and Mac. Draft-first by design."
+    "footer.copy": "Native AI task inbox for iPhone and Mac. Draft-first by design.",
+    "footer.github": "GitHub 仓库"
   },
   en: {
     "nav.workflow": "Workflow",
     "nav.surfaces": "App surfaces",
     "nav.faq": "FAQ",
+    "nav.github": "GitHub",
     "nav.cta": "See flow",
     "hero.title": "Messy input, clear drafts",
     "hero.subtitle": "Lisdo is an AI task inbox for iPhone and Mac. Paste text, import screenshots, record voice, or capture from the share sheet. AI drafts first, you approve before anything becomes a todo.",
@@ -195,7 +198,8 @@ const copy = {
     "faq.a3": "The default strategy is local Vision OCR, syncing OCR text and metadata. Original images are not synced through iCloud by default.",
     "faq.q4": "Are voice, Share Extension, and menu bar capture ready?",
     "faq.a4": "MVP 1 includes real shells and product-grade placeholders. Real share ingestion, voice pipeline, and Mac screen-region capture belong to MVP 2/3.",
-    "footer.copy": "Native AI task inbox for iPhone and Mac. Draft-first by design."
+    "footer.copy": "Native AI task inbox for iPhone and Mac. Draft-first by design.",
+    "footer.github": "GitHub repo"
   }
 };
 

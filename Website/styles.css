@@ -191,6 +191,16 @@ button {
   background: rgba(255, 253, 248, 0.86);
 }
 
+.repo-link {
+  gap: 8px;
+}
+
+.repo-link svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
 .pill-button.large {
   min-height: 54px;
   padding: 0 26px;
@@ -1083,6 +1093,14 @@ button {
 
 .site-footer p {
   margin: 0;
+}
+
+.footer-repo-link {
+  color: var(--ink-1);
+  font-size: 14px;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .reveal {
