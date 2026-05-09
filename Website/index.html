@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lisdo — AI Task Inbox</title>
+    <meta
+      name="description"
+      content="Lisdo is a native AI task inbox for iPhone and Mac. Capture messy input, review AI drafts, and save category todos with iCloud sync."
+    >
+    <link rel="icon" href="assets/lisdo-logo.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Lisdo home">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/lisdo-logo.png" alt="">
+        </span>
+        <span>Lisdo</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#workflow" data-i18n="nav.workflow">工作流</a>
+        <a href="#surfaces" data-i18n="nav.surfaces">产品界面</a>
+        <a href="#faq" data-i18n="nav.faq">常见问题</a>
+      </nav>
+
+      <div class="header-actions">
+        <div class="language-toggle" aria-label="Language">
+          <button type="button" data-lang-option="zh" aria-pressed="true">中</button>
+          <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+        </div>
+        <a class="pill-button dark" href="#capture" data-i18n="nav.cta">查看流程</a>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero section-pad">
+        <div class="hero-copy reveal">
+          <h1 data-i18n="hero.title">杂乱输入，先成草稿</h1>
+          <p data-i18n="hero.subtitle">
+            Lisdo 是 iPhone 和 Mac 上的 AI task inbox。复制文字、导入截图、语音记录或从分享面板捕获内容，先生成草稿，再由你确认保存为分类待办。
+          </p>
+          <div class="hero-actions">
+            <a class="pill-button dark large" href="#workflow" data-i18n="hero.primary">看它如何工作</a>
+            <a class="pill-button light large" href="#surfaces" data-i18n="hero.secondary">查看 App 组件</a>
+          </div>
+        </div>
+
+        <div class="hero-stage reveal" aria-label="Lisdo product illustration">
+          <div class="floating-note note-left">
+            <span class="source-pill" data-i18n="mock.sourceScreenshot">截图 OCR</span>
+            <p data-i18n="mock.messyText">周四 seminar 前把 questionnaire 改完，发给 Yan 看，顺便确认 Zoom recording 设置。</p>
+          </div>
+
+          <div class="phone-shell">
+            <div class="phone-top"></div>
+            <div class="phone-screen">
+              <div class="screen-header">
+                <span data-i18n="mock.inbox">Inbox</span>
+                <span class="tiny-chip">3</span>
+              </div>
+              <article class="draft-card">
+                <div class="draft-top">
+                  <span class="source-pill" data-i18n="mock.pastedText">粘贴文字</span>
+                  <span class="draft-chip">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l1.2 4.2L17 9.5l-3.8 1.3L12 15l-1.2-4.2L7 9.5l3.8-1.3L12 4Z"></path></svg>
+                    <span data-i18n="mock.draft">草稿</span>
+                  </span>
+                </div>
+                <div class="category-line">
+                  <span class="cat-dot blue"></span>
+                  <span data-i18n="mock.suggestedCategory">Work · 建议分类</span>
+                </div>
+                <h3 data-i18n="mock.draftTitle">准备 UCI study group questionnaire</h3>
+                <p data-i18n="mock.draftSummary">修改问卷、发给 Yan 复核，并确认 Zoom 录制设置。</p>
+                <ul class="check-list">
+                  <li data-i18n="mock.stepOne">修改 questionnaire</li>
+                  <li data-i18n="mock.stepTwo">发给 Yan review</li>
+                  <li data-i18n="mock.stepThree">确认 Zoom recording</li>
+                </ul>
+                <div class="draft-actions">
+                  <button type="button" data-i18n="mock.save">保存</button>
+                  <button type="button" data-i18n="mock.edit">编辑</button>
+                  <button type="button" data-i18n="mock.revise">调整</button>
+                </div>
+              </article>
+              <nav class="phone-tabs" aria-label="Phone tabs">
+                <span data-i18n="mock.tabInbox">收件箱</span>
+                <span data-i18n="mock.tabCapture">捕获</span>
+                <span data-i18n="mock.tabPlan">计划</span>
+              </nav>
+            </div>
+          </div>
+
+          <div class="floating-widget note-right">
+            <span class="mini-title" data-i18n="mock.widgetTitle">待审核草稿</span>
+            <strong data-i18n="mock.widgetTask">Review draft before 3 PM</strong>
+            <span data-i18n="mock.widgetMeta">Live Activity shell</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" class="section-pad feature-wrap reveal">
+        <div class="panel-back" aria-hidden="true"></div>
+        <div class="feature-panel">
+          <div class="panel-copy">
+            <h2 data-i18n="workflow.title">Payday your way 的节奏，换成 Lisdo 的 draft-first 工作流</h2>
+            <p data-i18n="workflow.body">
+              灵感来自 Ko-fi 首页的清晰节奏：一个大面板讲清核心动作。Lisdo 的核心动作不是“直接生成待办”，而是把捕获内容先变成可检查的 AI 草稿。
+            </p>
+            <a class="pill-button dark" href="#capture" data-i18n="workflow.cta">走一遍流程</a>
+          </div>
+
+          <div class="workflow-steps" aria-label="Lisdo workflow">
+            <div class="step-card">
+              <span>01</span>
+              <h3 data-i18n="workflow.step1Title">Capture</h3>
+              <p data-i18n="workflow.step1Body">文字、截图、照片、分享内容、语音都进入同一个 inbox。</p>
+            </div>
+            <div class="step-card active">
+              <span>02</span>
+              <h3 data-i18n="workflow.step2Title">Draft</h3>
+              <p data-i18n="workflow.step2Body">Vision OCR 和 BYOK provider 生成严格 JSON 草稿。</p>
+            </div>
+            <div class="step-card">
+              <span>03</span>
+              <h3 data-i18n="workflow.step3Title">Review</h3>
+              <p data-i18n="workflow.step3Body">用户编辑标题、摘要、清单、日期和分类。</p>
+            </div>
+            <div class="step-card">
+              <span>04</span>
+              <h3 data-i18n="workflow.step4Title">Save</h3>
+              <p data-i18n="workflow.step4Body">确认后保存为 category todo，并通过 iCloud 同步。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="capture" class="section-pad capture-section">
+        <div class="section-heading reveal">
+          <h2 data-i18n="capture.title">各种输入，都先进入收件箱</h2>
+          <p data-i18n="capture.subtitle">像 Ko-fi 的创作者胶囊一样，Lisdo 把不同 capture source 变成清晰入口。</p>
+        </div>
+
+        <div class="capture-grid reveal" role="tablist" aria-label="Capture sources">
+          <button class="capture-pill is-active" type="button" role="tab" aria-selected="true" data-capture="text">
+            <span aria-hidden="true">⌘</span>
+            <span data-i18n="capture.text">粘贴文字</span>
+          </button>
+          <button class="capture-pill" type="button" role="tab" aria-selected="false" data-capture="ocr">
+            <span aria-hidden="true">□</span>
+            <span data-i18n="capture.ocr">截图 OCR</span>
+          </button>
+          <button class="capture-pill" type="button" role="tab" aria-selected="false" data-capture="share">
+            <span aria-hidden="true">↗</span>
+            <span data-i18n="capture.share">Share Sheet</span>
+          </button>
+          <button class="capture-pill" type="button" role="tab" aria-selected="false" data-capture="voice">
+            <span aria-hidden="true">◉</span>
+            <span data-i18n="capture.voice">语音记录</span>
+          </button>
+          <button class="capture-pill" type="button" role="tab" aria-selected="false" data-capture="mac">
+            <span aria-hidden="true">⌥</span>
+            <span data-i18n="capture.mac">Mac 菜单栏</span>
+          </button>
+          <button class="capture-pill" type="button" role="tab" aria-selected="false" data-capture="widget">
+            <span aria-hidden="true">▣</span>
+            <span data-i18n="capture.widget">Widgets</span>
+          </button>
+        </div>
+
+        <div class="capture-example reveal" aria-live="polite">
+          <div>
+            <span class="source-pill example-kind" data-i18n="examples.text.kind">Pasted text</span>
+            <h3 class="example-title" data-i18n="examples.text.title">从聊天记录里提取行动项</h3>
+            <p class="example-body" data-i18n="examples.text.body">把 email、课程要求或会议记录粘进 Lisdo，AI 只生成可审核草稿，不直接写入正式待办。</p>
+          </div>
+          <article class="pending-row">
+            <span class="pending-icon" aria-hidden="true">✦</span>
+            <div>
+              <strong data-i18n="examples.pendingTitle">正在整理为草稿</strong>
+              <span data-i18n="examples.pendingBody">提取文字、匹配分类、等待用户 review</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="surfaces" class="section-pad surfaces">
+        <div class="section-heading reveal">
+          <h2 data-i18n="surfaces.title">不是截图，是用网页重建的 Lisdo 组件</h2>
+          <p data-i18n="surfaces.subtitle">页面里的产品画面直接模仿源码组件：draft card、pending queue、Mac sidebar，以及 Gmail capture 转 draft 的流程。</p>
+        </div>
+
+        <div class="surface-grid">
+          <div class="mac-window reveal">
+            <div class="mac-titlebar">
+              <span></span><span></span><span></span>
+              <strong data-i18n="mac.title">Lisdo Mac</strong>
+            </div>
+            <div class="mac-body">
+              <aside class="mac-sidebar">
+                <span class="side-item active" data-i18n="mac.inbox">Inbox</span>
+                <span class="side-item" data-i18n="mac.drafts">Drafts</span>
+                <span class="side-item" data-i18n="mac.today">Today</span>
+                <span class="side-item" data-i18n="mac.fromPhone">From iPhone</span>
+              </aside>
+              <div class="mac-main">
+                <div class="mac-toolbar">
+                  <span data-i18n="mac.ready">3 drafts ready</span>
+                  <button type="button" data-i18n="mac.capture">Capture</button>
+                </div>
+                <article class="draft-card compact">
+                  <div class="draft-top">
+                    <span class="source-pill" data-i18n="mock.sourceScreenshot">截图 OCR</span>
+                    <span class="draft-chip" data-i18n="mock.draft">草稿</span>
+                  </div>
+                  <h3 data-i18n="mac.cardTitle">整理 DBH 3210 seminar notes</h3>
+                  <p data-i18n="mac.cardBody">确认问卷、房间、打印和 Zoom 设置。</p>
+                </article>
+                <article class="pending-row muted">
+                  <span class="pending-icon" aria-hidden="true">☁</span>
+                  <div>
+                    <strong data-i18n="mac.pendingTitle">Waiting for Mac</strong>
+                    <span data-i18n="mac.pendingBody">iPhone capture will process when Mac is available.</span>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+
+          <div class="review-card reveal">
+            <span class="draft-chip">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l1.2 4.2L17 9.5l-3.8 1.3L12 15l-1.2-4.2L7 9.5l3.8-1.3L12 4Z"></path></svg>
+              <span data-i18n="review.badge">Review draft</span>
+            </span>
+            <h3 data-i18n="review.title">保存前总有一步确认</h3>
+            <p data-i18n="review.body">用户可以改分类、标题、摘要、清单和日期。只有点击“保存为待办”后，它才进入正式列表。</p>
+          </div>
+
+          <div class="gmail-demo reveal">
+            <div class="gmail-window" aria-label="Gmail screenshot style demo">
+              <div class="gmail-tabbar">
+                <span class="gmail-tab-icon" aria-hidden="true">
+                  <img src="assets/lisdo-logo.png" alt="">
+                </span>
+                <span class="gmail-tab">Gmail</span>
+                <span class="gmail-label">Inbox</span>
+              </div>
+              <article class="gmail-message">
+                <div class="gmail-subject">
+                  <h3 data-i18n="gmail.subject">[MATH-022-500s-SP26] Reminder: Math 22 Final Exam</h3>
+                  <span data-i18n="gmail.time">Tue, May 5, 9:53 AM</span>
+                </div>
+                <div class="gmail-meta">
+                  <span class="gmail-avatar" aria-hidden="true">M</span>
+                  <div>
+                    <strong data-i18n="gmail.sender">Prof. Cream</strong>
+                    <span data-i18n="gmail.to">to me</span>
+                  </div>
+                </div>
+                <div class="gmail-body">
+                  <p data-i18n="gmail.p1">Hello all,</p>
+                  <p data-i18n="gmail.p2">As a reminder, our Math 22 final exam will take place tomorrow at 12pm (noon). The exam is three hours long.</p>
+                  <p data-i18n="gmail.p3">Your section will take the exam in Packard 101. Students with extended-time accommodations will move to the extra-time room after standard time concludes.</p>
+                  <p data-i18n="gmail.p4">Good luck, and see y'all tomorrow.</p>
+                </div>
+              </article>
+            </div>
+
+            <div class="flow-arrow" aria-hidden="true">
+              <span></span>
+            </div>
+
+            <div class="gmail-draft-output">
+              <span class="draft-chip">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l1.2 4.2L17 9.5l-3.8 1.3L12 15l-1.2-4.2L7 9.5l3.8-1.3L12 4Z"></path></svg>
+                <span data-i18n="gmail.draftBadge">Draft from Gmail</span>
+              </span>
+              <article class="draft-card gmail-draft-card">
+                <div class="category-line">
+                  <span class="cat-dot blue"></span>
+                  <span data-i18n="gmail.category">School · suggested</span>
+                </div>
+                <h3 data-i18n="gmail.draftTitle">Prepare for Math 22 final exam</h3>
+                <p data-i18n="gmail.draftSummary">Final exam is tomorrow at 12 PM in Packard 101. Plan for a three-hour exam and note the extended-time room move.</p>
+                <ul class="check-list">
+                  <li data-i18n="gmail.step1">Be at Packard 101 before noon</li>
+                  <li data-i18n="gmail.step2">Block 12 PM-3 PM for the exam</li>
+                  <li data-i18n="gmail.step3">Confirm extended-time instructions if needed</li>
+                </ul>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-pad story reveal">
+        <div>
+          <h2 data-i18n="story.title">安静一点，但工作流要完整</h2>
+          <p data-i18n="story.p1">
+            Ko-fi 的动效是轻盈、友好、容易理解。Lisdo 借用这种节奏，但视觉回到原生 Apple 产品：纯净表面、近黑文字、低饱和状态色和克制阴影。
+          </p>
+          <p data-i18n="story.p2">
+            页面避免夸张 AI 营销语言，因为 Lisdo 的价值不是炫技，而是让 messy capture 变成可检查、可同步、可执行的任务。
+          </p>
+        </div>
+        <div class="story-lines" aria-hidden="true">
+          <span>Capture</span>
+          <span>OCR</span>
+          <span>Draft</span>
+          <span>Review</span>
+          <span>Todo</span>
+          <span>iCloud</span>
+        </div>
+      </section>
+
+      <section id="faq" class="section-pad faq">
+        <div class="section-heading reveal">
+          <h2 data-i18n="faq.title">常见问题</h2>
+          <p data-i18n="faq.subtitle">按产品路线图解释，不承诺 MVP 1 不包含的能力。</p>
+        </div>
+
+        <div class="faq-list reveal">
+          <div class="faq-item">
+            <button type="button" aria-expanded="true">
+              <span data-i18n="faq.q1">AI 会不会直接替我创建待办？</span>
+              <span aria-hidden="true">+</span>
+            </button>
+            <div class="faq-panel">
+              <p data-i18n="faq.a1">不会。Lisdo 的产品流要求所有 AI 输出先成为 draft。用户 review、编辑并确认后，才保存为正式 todo。</p>
+            </div>
+          </div>
+          <div class="faq-item">
+            <button type="button" aria-expanded="false">
+              <span data-i18n="faq.q2">iPhone 和 Mac 如何同步？</span>
+              <span aria-hidden="true">+</span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p data-i18n="faq.a2">MVP 1 设计为 SwiftData + CloudKit，同步 categories、captures、drafts、todos 和 pending queue metadata。API keys 和 provider secrets 只保存在本机 Keychain。</p>
+            </div>
+          </div>
+          <div class="faq-item">
+            <button type="button" aria-expanded="false">
+              <span data-i18n="faq.q3">截图和图片会上传吗？</span>
+              <span aria-hidden="true">+</span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p data-i18n="faq.a3">默认策略是本机 Vision OCR，并同步 OCR text 与 metadata；原图默认不通过 iCloud 同步。</p>
+            </div>
+          </div>
+          <div class="faq-item">
+            <button type="button" aria-expanded="false">
+              <span data-i18n="faq.q4">语音、Share Extension、菜单栏都可用了吗？</span>
+              <span aria-hidden="true">+</span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p data-i18n="faq.a4">MVP 1 有真实 shell 和产品级 placeholder。真实 share ingestion、voice pipeline、Mac screen region capture 属于 MVP 2/3。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/lisdo-logo.png" alt="">
+        </span>
+        <span>Lisdo</span>
+      </div>
+      <p data-i18n="footer.copy">Native AI task inbox for iPhone and Mac. Draft-first by design.</p>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

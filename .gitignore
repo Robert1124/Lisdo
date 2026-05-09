@@ -1,0 +1,41 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Xcode / Swift build output
+DerivedData/
+build/
+.build/
+Packages/*/build/
+*.xcworkspace/
+*.xcodeproj/
+*.xcuserdata/
+*.xcuserstate
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# Local signing / credentials / environment
+*.p8
+*.p12
+*.mobileprovision
+*.provisionprofile
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+tmp/
+*.tmp
+*.swp
+*.swo
+
+# Codex / local agent state
+.superpowers/
