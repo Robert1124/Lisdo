@@ -196,8 +196,8 @@
 
       <section id="surfaces" class="section-pad surfaces">
         <div class="section-heading reveal">
-          <h2 data-i18n="surfaces.title">不是截图，是用网页重建的 Lisdo 组件</h2>
-          <p data-i18n="surfaces.subtitle">页面里的产品画面直接模仿源码组件：draft card、pending queue、Mac sidebar，以及 Gmail capture 转 draft 的流程。</p>
+          <h2 data-i18n="surfaces.title">截图和粘贴内容，自动整理成 Todo 草稿</h2>
+          <p data-i18n="surfaces.subtitle">Lisdo 把截图 OCR 和粘贴文本格式化成包含 reminder、摘要和 bullet points 的可审核 todo。</p>
         </div>
 
         <div class="surface-grid">
@@ -246,32 +246,24 @@
             <p data-i18n="review.body">用户可以改分类、标题、摘要、清单和日期。只有点击“保存为待办”后，它才进入正式列表。</p>
           </div>
 
-          <div class="gmail-demo reveal">
-            <div class="gmail-window" aria-label="Gmail screenshot style demo">
-              <div class="gmail-tabbar">
-                <span class="gmail-tab-icon" aria-hidden="true">
+          <div class="format-demo reveal">
+            <div class="capture-source-window" aria-label="Screenshot and pasted text source demo">
+              <div class="source-tabbar">
+                <span class="source-tab-icon" aria-hidden="true">
                   <img src="assets/lisdo-logo.png" alt="">
                 </span>
-                <span class="gmail-tab">Gmail</span>
-                <span class="gmail-label">Inbox</span>
+                <span class="source-tab" data-i18n="format.sourceTab">Screenshot OCR</span>
+                <span class="source-label" data-i18n="format.pasteTab">Pasted text</span>
               </div>
-              <article class="gmail-message">
-                <div class="gmail-subject">
-                  <h3 data-i18n="gmail.subject">[MATH-022-500s-SP26] Reminder: Math 22 Final Exam</h3>
-                  <span data-i18n="gmail.time">Tue, May 5, 9:53 AM</span>
+              <article class="source-message">
+                <div class="source-header">
+                  <span class="source-pill" data-i18n="format.sourceBadge">Raw input</span>
+                  <span data-i18n="format.sourceTime">Today, 9:42 AM</span>
                 </div>
-                <div class="gmail-meta">
-                  <span class="gmail-avatar" aria-hidden="true">M</span>
-                  <div>
-                    <strong data-i18n="gmail.sender">Prof. Cream</strong>
-                    <span data-i18n="gmail.to">to me</span>
-                  </div>
-                </div>
-                <div class="gmail-body">
-                  <p data-i18n="gmail.p1">Hello all,</p>
-                  <p data-i18n="gmail.p2">As a reminder, our Math 22 final exam will take place tomorrow at 12pm (noon). The exam is three hours long.</p>
-                  <p data-i18n="gmail.p3">Your section will take the exam in Packard 101. Students with extended-time accommodations will move to the extra-time room after standard time concludes.</p>
-                  <p data-i18n="gmail.p4">Good luck, and see y'all tomorrow.</p>
+                <h3 data-i18n="format.sourceTitle">Math 22 final exam reminder</h3>
+                <div class="source-body">
+                  <p data-i18n="format.sourceP1">final exam tomorrow at 12pm noon, three hours</p>
+                  <p data-i18n="format.sourceP2">Packard 101. extended-time students move to extra-time room after standard time.</p>
                 </div>
               </article>
             </div>
@@ -280,22 +272,26 @@
               <span></span>
             </div>
 
-            <div class="gmail-draft-output">
+            <div class="format-output">
               <span class="draft-chip">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l1.2 4.2L17 9.5l-3.8 1.3L12 15l-1.2-4.2L7 9.5l3.8-1.3L12 4Z"></path></svg>
-                <span data-i18n="gmail.draftBadge">Draft from Gmail</span>
+                <span data-i18n="format.todoBadge">Formatted todo draft</span>
               </span>
-              <article class="draft-card gmail-draft-card">
+              <article class="draft-card format-todo-card">
                 <div class="category-line">
                   <span class="cat-dot blue"></span>
-                  <span data-i18n="gmail.category">School · suggested</span>
+                  <span data-i18n="format.category">School · suggested</span>
                 </div>
-                <h3 data-i18n="gmail.draftTitle">Prepare for Math 22 final exam</h3>
-                <p data-i18n="gmail.draftSummary">Final exam is tomorrow at 12 PM in Packard 101. Plan for a three-hour exam and note the extended-time room move.</p>
+                <h3 data-i18n="format.todoTitle">Prepare for Math 22 final exam</h3>
+                <p data-i18n="format.summary">Raw screenshot or pasted text becomes a reviewable task with the reminder preserved and bullet points generated.</p>
+                <div class="reminder-row">
+                  <strong data-i18n="format.reminderLabel">Reminder</strong>
+                  <span data-i18n="format.reminder">Tomorrow at 12:00 PM · Packard 101</span>
+                </div>
                 <ul class="check-list">
-                  <li data-i18n="gmail.step1">Be at Packard 101 before noon</li>
-                  <li data-i18n="gmail.step2">Block 12 PM-3 PM for the exam</li>
-                  <li data-i18n="gmail.step3">Confirm extended-time instructions if needed</li>
+                  <li data-i18n="format.point1">Be at Packard 101 before noon</li>
+                  <li data-i18n="format.point2">Block 12 PM-3 PM for the exam</li>
+                  <li data-i18n="format.point3">Confirm extended-time room instructions if needed</li>
                 </ul>
               </article>
             </div>
