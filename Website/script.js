@@ -6,7 +6,7 @@ const copy = {
     "nav.github": "GitHub",
     "nav.cta": "查看流程",
     "hero.title": "杂乱输入，先成草稿",
-    "hero.subtitle": "Lisdo 是 iPhone 和 Mac 上的 AI task inbox。复制文字、导入截图、语音记录或从分享面板捕获内容，先生成草稿，再由你确认保存为分类待办。",
+    "hero.subtitle": "Lisdo 是 iPhone 和 Mac 上的 AI task inbox。复制文字、导入截图、语音记录或从 Mac 菜单栏捕获内容，先生成草稿，再由你确认保存为分类待办。",
     "hero.primary": "看它如何工作",
     "hero.secondary": "查看 App 组件",
     "mock.sourceScreenshot": "截图 OCR",
@@ -33,7 +33,7 @@ const copy = {
     "workflow.body": "灵感来自 Ko-fi 首页的清晰节奏：一个大面板讲清核心动作。Lisdo 的核心动作不是“直接生成待办”，而是把捕获内容先变成可检查的 AI 草稿。",
     "workflow.cta": "走一遍流程",
     "workflow.step1Title": "Capture",
-    "workflow.step1Body": "文字、截图、照片、分享内容、语音都进入同一个 inbox。",
+    "workflow.step1Body": "文字、截图、照片、语音和 Mac 捕获都进入同一个 inbox。",
     "workflow.step2Title": "Draft",
     "workflow.step2Body": "Vision OCR 和 BYOK provider 生成严格 JSON 草稿。",
     "workflow.step3Title": "Review",
@@ -44,7 +44,6 @@ const copy = {
     "capture.subtitle": "像 Ko-fi 的创作者胶囊一样，Lisdo 把不同 capture source 变成清晰入口。",
     "capture.text": "粘贴文字",
     "capture.ocr": "截图 OCR",
-    "capture.share": "Share Sheet",
     "capture.voice": "语音记录",
     "capture.mac": "Mac 菜单栏",
     "capture.widget": "Widgets",
@@ -94,8 +93,8 @@ const copy = {
     "faq.a2": "MVP 1 设计为 SwiftData + CloudKit，同步 categories、captures、drafts、todos 和 pending queue metadata。API keys 和 provider secrets 只保存在本机 Keychain。",
     "faq.q3": "截图和图片会上传吗？",
     "faq.a3": "默认策略是本机 Vision OCR，并同步 OCR text 与 metadata；原图默认不通过 iCloud 同步。",
-    "faq.q4": "语音、Share Extension、菜单栏都可用了吗？",
-    "faq.a4": "MVP 1 有真实 shell 和产品级 placeholder。真实 share ingestion、voice pipeline、Mac screen region capture 属于 MVP 2/3。",
+    "faq.q4": "语音和菜单栏捕获都可用了吗？",
+    "faq.a4": "MVP 1 有真实 shell 和产品级 placeholder。真实 voice pipeline 和 Mac screen region capture 属于 MVP 2/3。",
     "footer.copy": "Native AI task inbox for iPhone and Mac. Draft-first by design.",
     "footer.github": "GitHub 仓库"
   },
@@ -106,7 +105,7 @@ const copy = {
     "nav.github": "GitHub",
     "nav.cta": "See flow",
     "hero.title": "Messy input, clear drafts",
-    "hero.subtitle": "Lisdo is an AI task inbox for iPhone and Mac. Paste text, import screenshots, record voice, or capture from the share sheet. AI drafts first, you approve before anything becomes a todo.",
+    "hero.subtitle": "Lisdo is an AI task inbox for iPhone and Mac. Paste text, import screenshots, record voice, or capture from the Mac menu bar. AI drafts first, you approve before anything becomes a todo.",
     "hero.primary": "See how it works",
     "hero.secondary": "View app components",
     "mock.sourceScreenshot": "Screenshot OCR",
@@ -133,7 +132,7 @@ const copy = {
     "workflow.body": "Ko-fi explains one core action with a big friendly panel. Lisdo's core action is not saving AI output directly. Captures become reviewable AI drafts first.",
     "workflow.cta": "Walk the flow",
     "workflow.step1Title": "Capture",
-    "workflow.step1Body": "Text, screenshots, photos, share items, and voice enter one inbox.",
+    "workflow.step1Body": "Text, screenshots, photos, voice notes, and Mac captures enter one inbox.",
     "workflow.step2Title": "Draft",
     "workflow.step2Body": "Vision OCR and a BYOK provider create strict JSON drafts.",
     "workflow.step3Title": "Review",
@@ -144,7 +143,6 @@ const copy = {
     "capture.subtitle": "Like Ko-fi's creator pills, Lisdo turns different capture sources into clear entry points.",
     "capture.text": "Text paste",
     "capture.ocr": "Screenshot OCR",
-    "capture.share": "Share Sheet",
     "capture.voice": "Voice note",
     "capture.mac": "Mac menu bar",
     "capture.widget": "Widgets",
@@ -194,8 +192,8 @@ const copy = {
     "faq.a2": "MVP 1 is designed around SwiftData + CloudKit for categories, captures, drafts, todos, and pending queue metadata. API keys and provider secrets stay in local Keychain.",
     "faq.q3": "Are screenshots and images uploaded?",
     "faq.a3": "The default strategy is local Vision OCR, syncing OCR text and metadata. Original images are not synced through iCloud by default.",
-    "faq.q4": "Are voice, Share Extension, and menu bar capture ready?",
-    "faq.a4": "MVP 1 includes real shells and product-grade placeholders. Real share ingestion, voice pipeline, and Mac screen-region capture belong to MVP 2/3.",
+    "faq.q4": "Are voice and menu bar capture ready?",
+    "faq.a4": "MVP 1 includes real shells and product-grade placeholders. Real voice pipeline and Mac screen-region capture belong to MVP 2/3.",
     "footer.copy": "Native AI task inbox for iPhone and Mac. Draft-first by design.",
     "footer.github": "GitHub repo"
   }
@@ -212,11 +210,6 @@ const captureExamples = {
       kind: "Screenshot OCR",
       title: "从截图中读出任务",
       body: "Vision 在本机提取 OCR 文本，再由 provider 生成结构化草稿，原图默认不通过 iCloud 同步。"
-    },
-    share: {
-      kind: "Share Sheet",
-      title: "从系统分享入口捕获",
-      body: "MVP 1 有真实 Share Extension shell；真实 ingestion 会在后续 MVP 接进同一条 draft pipeline。"
     },
     voice: {
       kind: "Voice note",
@@ -244,11 +237,6 @@ const captureExamples = {
       kind: "Screenshot OCR",
       title: "Read tasks from screenshots",
       body: "Vision extracts text locally, then the provider creates a structured draft. Original images are not synced through iCloud by default."
-    },
-    share: {
-      kind: "Share Sheet",
-      title: "Capture from the system share sheet",
-      body: "MVP 1 includes a real Share Extension shell. Real ingestion later joins the same draft pipeline."
     },
     voice: {
       kind: "Voice note",
