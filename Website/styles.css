@@ -896,48 +896,14 @@ button {
 }
 
 .source-message {
-  padding: 26px 28px 30px;
-  color: #202124;
+  display: block;
+  padding: 0;
 }
 
-.source-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: start;
-  margin-bottom: 18px;
-}
-
-.source-header > span:last-child {
-  color: #5f6368;
-  font-size: 14px;
-  white-space: nowrap;
-}
-
-.source-message h3 {
-  max-width: 760px;
-  margin: 0 0 18px;
-  font-size: clamp(24px, 2.6vw, 38px);
-  font-weight: 700;
-  line-height: 1.08;
-  letter-spacing: 0;
-}
-
-.source-body {
-  max-width: 860px;
-  display: grid;
-  gap: 14px;
-}
-
-.source-body p {
-  margin: 0;
-  padding: 14px 16px;
-  border: 1px solid rgba(40, 37, 31, 0.1);
-  border-radius: 14px;
-  background: rgba(248, 245, 239, 0.72);
-  color: #202124;
-  font-size: clamp(15px, 1.5vw, 18px);
-  line-height: 1.45;
+.source-screenshot {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .flow-arrow {
@@ -1297,14 +1263,6 @@ button {
     padding: 16px;
   }
 
-  .source-message {
-    padding: 18px;
-  }
-
-  .source-header {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="640" viewBox="0 0 1100 640" role="img" aria-labelledby="title desc">
+  <title id="title">Math 22 final exam reminder screenshot</title>
+  <desc id="desc">A captured screenshot containing a Math 22 final exam reminder message.</desc>
+  <rect width="1100" height="640" rx="0" fill="#ffffff"/>
+  <rect x="0" y="0" width="1100" height="640" fill="#ffffff"/>
+
+  <text x="60" y="78" fill="#202124" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="34" font-weight="500">
+    [MATH-022-500s-SP26] Reminder:
+  </text>
+  <text x="60" y="122" fill="#202124" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="34" font-weight="500">
+    Math 22 Final Exam
+  </text>
+  <rect x="940" y="60" width="82" height="34" rx="9" fill="#e0e0de"/>
+  <text x="958" y="83" fill="#4a4a46" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="600">Inbox</text>
+
+  <circle cx="86" cy="204" r="42" fill="#0aa4b0"/>
+  <text x="86" y="217" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="34" font-weight="500">M</text>
+  <rect x="146" y="169" width="420" height="18" rx="4" fill="#d7d7d4"/>
+  <rect x="146" y="194" width="276" height="14" rx="4" fill="#eeeeea"/>
+  <text x="146" y="239" fill="#5f6368" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20">to me</text>
+  <text x="756" y="206" fill="#5f6368" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="22">Tue, May 5, 9:53 AM</text>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" fill="#202124" font-size="26">
+    <text x="146" y="310">Hello all,</text>
+    <text x="146" y="376">As a reminder, our Math 22 final exam will take place tomorrow at 12pm (noon).</text>
+    <text x="146" y="416">The exam is three hours long.</text>
+    <text x="146" y="488">Your section will take the exam in Packard 101.</text>
+    <text x="146" y="528">Students with extended-time accommodations will move to the extra-time room</text>
+    <text x="146" y="568">after the standard time concludes.</text>
+    <text x="146" y="620">Good luck, and see y&apos;all tomorrow.</text>
+  </g>
+</svg>
