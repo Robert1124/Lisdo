@@ -76,7 +76,7 @@ cd Website
 python3 -m http.server 4173 --bind 127.0.0.1
 ```
 
-Then open `http://127.0.0.1:4173/`. Use `?lang=en` for the English version.
+Then open `http://127.0.0.1:4173/`. English is the default; use `?lang=zh` for the Chinese version.
 
 ## Product Guardrails
 

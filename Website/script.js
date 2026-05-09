@@ -266,7 +266,7 @@ const captureExamples = {
   }
 };
 
-let currentLang = new URLSearchParams(window.location.search).get("lang") === "en" ? "en" : "zh";
+let currentLang = new URLSearchParams(window.location.search).get("lang") === "zh" ? "zh" : "en";
 let currentCapture = "text";
 
 function applyLanguage(lang) {
@@ -283,9 +283,9 @@ function applyLanguage(lang) {
   });
   const url = new URL(window.location.href);
   if (lang === "en") {
-    url.searchParams.set("lang", "en");
-  } else {
     url.searchParams.delete("lang");
+  } else {
+    url.searchParams.set("lang", "zh");
   }
   history.replaceState({}, "", url);
   updateCaptureExample(currentCapture);
