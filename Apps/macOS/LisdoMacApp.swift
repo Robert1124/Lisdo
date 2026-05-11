@@ -38,43 +38,86 @@ struct LisdoMacApp: App {
 
         Settings {
             LisdoMacProviderSettingsView()
-                .frame(width: 460)
+                .modelContainer(modelContainerResult.container)
+                .frame(width: 560, height: 580)
         }
     }
 }
 
 final class LisdoMacAppDelegate: NSObject, NSApplicationDelegate {
-    private let hotKeyRegistrar = MacGlobalHotKeyRegistrar()
+    private let quickCaptureHotKeyRegistrar = MacGlobalHotKeyRegistrar(identifier: 1)
+    private let selectedAreaHotKeyRegistrar = MacGlobalHotKeyRegistrar(identifier: 2)
+    private var hotKeyObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        registerGlobalHotKey()
+        registerGlobalHotKeys()
+        hotKeyObserver = NotificationCenter.default.addObserver(
+            forName: LisdoMacNotifications.hotKeysChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.registerGlobalHotKeys()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        hotKeyRegistrar.unregister()
+        quickCaptureHotKeyRegistrar.unregister()
+        selectedAreaHotKeyRegistrar.unregister()
+        if let hotKeyObserver {
+            NotificationCenter.default.removeObserver(hotKeyObserver)
+        }
     }
 
-    private func registerGlobalHotKey() {
+    private func registerGlobalHotKeys() {
+        quickCaptureHotKeyRegistrar.unregister()
+        selectedAreaHotKeyRegistrar.unregister()
+
+        var statusMessages: [String] = []
+        register(
+            action: .quickCapture,
+            registrar: quickCaptureHotKeyRegistrar,
+            successLabel: "Quick Capture"
+        ) {
+            NotificationCenter.default.post(name: LisdoMacNotifications.openCapture, object: nil)
+        } status: { message in
+            statusMessages.append(message)
+        }
+
+        register(
+            action: .selectedArea,
+            registrar: selectedAreaHotKeyRegistrar,
+            successLabel: "Selected Area"
+        ) {
+            NotificationCenter.default.post(name: LisdoMacNotifications.selectScreenArea, object: nil)
+        } status: { message in
+            statusMessages.append(message)
+        }
+
+        UserDefaults.standard.set(
+            statusMessages.isEmpty ? "Global hotkeys are off." : statusMessages.joined(separator: " "),
+            forKey: LisdoMacNotifications.hotKeyStatusDefaultsKey
+        )
+    }
+
+    private func register(
+        action: LisdoMacHotKeyAction,
+        registrar: MacGlobalHotKeyRegistrar,
+        successLabel: String,
+        callback: @escaping @Sendable () -> Void,
+        status: (String) -> Void
+    ) {
+        let preset = LisdoMacHotKeyPreferences.preset(for: action)
+        guard let hotKey = preset.hotKey else {
+            status("\(successLabel) hotkey is off.")
+            return
+        }
+
         do {
-            try hotKeyRegistrar.register(
-                hotKey: MacGlobalHotKey(
-                    keyCode: 49,
-                    modifiers: UInt32(cmdKey | shiftKey)
-                ),
-                callback: {
-                    NotificationCenter.default.post(name: LisdoMacNotifications.openCapture, object: nil)
-                }
-            )
-            UserDefaults.standard.set(
-                "Global hotkey ready: Command-Shift-Space.",
-                forKey: LisdoMacNotifications.hotKeyStatusDefaultsKey
-            )
+            try registrar.register(hotKey: hotKey, callback: callback)
+            status("\(successLabel): \(preset.title).")
         } catch {
-            UserDefaults.standard.set(
-                "Global hotkey could not be registered: \(error.localizedDescription)",
-                forKey: LisdoMacNotifications.hotKeyStatusDefaultsKey
-            )
+            status("\(successLabel) hotkey failed: \(error.localizedDescription)")
         }
     }
 }

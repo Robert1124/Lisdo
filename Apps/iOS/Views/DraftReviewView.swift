@@ -52,7 +52,6 @@ struct DraftReviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    sourceSection
                     categorySection
                     editorSection
                     reviseSection
@@ -71,9 +70,6 @@ struct DraftReviewView: View {
             .navigationTitle("Review draft")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }
-                }
                 ToolbarItem(placement: .principal) {
                     LisdoDraftChip()
                 }
@@ -197,23 +193,26 @@ struct DraftReviewView: View {
                 }
 
                 ForEach(blocks.indices, id: \.self) { index in
-                    HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Circle()
                             .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
                             .foregroundStyle(LisdoTheme.ink1.opacity(0.35))
                             .frame(width: 16, height: 16)
+                            .alignmentGuide(.firstTextBaseline) { dimensions in
+                                dimensions[VerticalAlignment.center] + 2
+                            }
                         TextField("Checklist item", text: blockBinding(at: index), axis: .vertical)
                             .font(.system(size: 14))
+                            .foregroundStyle(LisdoTheme.ink1)
                             .textFieldStyle(.plain)
-                        Button {
-                            blocks.remove(at: index)
-                            reorderBlocks()
-                        } label: {
-                            Image(systemName: "minus.circle")
-                                .foregroundStyle(LisdoTheme.ink4)
-                        }
-                        .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        LisdoInlineDeleteButton(
+                            accessibilityLabel: "Delete checklist item",
+                            action: { deleteBlock(at: index) }
+                        )
                     }
+                    .padding(.vertical, 3)
                 }
             }
 
@@ -251,17 +250,15 @@ struct DraftReviewView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Date")
                     .font(.system(size: 11, weight: .medium))
                     .tracking(0.8)
                     .foregroundStyle(LisdoTheme.ink3)
-                Picker("Date", selection: $dateMode) {
-                    ForEach(LisdoIOSDraftDateMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
+                LisdoSegmentedControl(
+                    selection: $dateMode,
+                    options: LisdoIOSDraftDateMode.allCases.map { ($0, $0.title) }
+                )
 
                 if dateMode != .none {
                     DatePicker(
@@ -270,6 +267,7 @@ struct DraftReviewView: View {
                         displayedComponents: [.date, .hourAndMinute]
                     )
                     .datePickerStyle(.compact)
+                    .padding(.top, 4)
                 }
 
                 TextField("Original date phrase, optional", text: $dueDateText)
@@ -325,10 +323,13 @@ struct DraftReviewView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 10) {
-            Button("Keep editing") {}
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .frame(maxWidth: .infinity)
+            Button(role: .destructive) {
+                deleteDraft()
+            } label: {
+                Label("Delete", systemImage: "trash")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(LisdoTonalButtonStyle(height: 50))
 
             Button {
                 saveAsTodo()
@@ -336,15 +337,18 @@ struct DraftReviewView: View {
                 Label("Save as todo", systemImage: "checkmark")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(LisdoTheme.ink1)
+            .buttonStyle(LisdoTonalButtonStyle(isProminent: true, height: 50))
             .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 10)
-        .background(.thinMaterial)
+        .background(LisdoTheme.surface.opacity(0.96))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(LisdoTheme.divider.opacity(0.65))
+                .frame(height: 1)
+        }
     }
 
     private var sourceIcon: String {
@@ -395,57 +399,59 @@ struct DraftReviewView: View {
 
     private func reminderRow(at index: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 9) {
-                Button {
-                    suggestedReminders[index].defaultSelected.toggle()
-                } label: {
-                    Image(systemName: suggestedReminders[index].defaultSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(suggestedReminders[index].defaultSelected ? LisdoTheme.ink1 : LisdoTheme.ink4)
+                HStack(alignment: .top, spacing: 9) {
+                    Button {
+                        suggestedReminders[index].defaultSelected.toggle()
+                    } label: {
+                        Image(systemName: suggestedReminders[index].defaultSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(suggestedReminders[index].defaultSelected ? LisdoTheme.ink1 : LisdoTheme.ink4)
+                            .frame(width: 18, height: 18)
+                            .padding(.top, 2)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(suggestedReminders[index].defaultSelected ? "Reminder selected" : "Reminder not selected")
+
+                    TextField("Reminder title", text: reminderTitleBinding(at: index), axis: .vertical)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(LisdoTheme.ink1)
+                        .textFieldStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    LisdoInlineDeleteButton(
+                        accessibilityLabel: "Delete reminder",
+                        action: { deleteReminder(at: index) }
+                    )
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(suggestedReminders[index].defaultSelected ? "Reminder selected" : "Reminder not selected")
 
-                TextField("Reminder title", text: reminderTitleBinding(at: index), axis: .vertical)
-                    .font(.system(size: 14, weight: .medium))
-                    .textFieldStyle(.plain)
-
-                Button {
-                    suggestedReminders.remove(at: index)
-                    reorderReminders()
-                } label: {
-                    Image(systemName: "minus.circle")
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "bell")
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(LisdoTheme.ink4)
+                        .frame(width: 16)
+                    TextField("Reminder time, e.g. the day before", text: reminderDateBinding(at: index), axis: .vertical)
+                        .font(.system(size: 12))
+                        .foregroundStyle(LisdoTheme.ink2)
+                        .textFieldStyle(.plain)
                 }
-                .buttonStyle(.plain)
-            }
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: "bell")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(LisdoTheme.ink4)
-                    .frame(width: 16)
-                TextField("Reminder time, e.g. the day before", text: reminderDateBinding(at: index), axis: .vertical)
-                    .font(.system(size: 12))
-                    .textFieldStyle(.plain)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "text.quote")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(LisdoTheme.ink4)
+                        .frame(width: 16)
+                    TextField("Why this reminder helps", text: reminderReasonBinding(at: index), axis: .vertical)
+                        .font(.system(size: 12))
+                        .foregroundStyle(LisdoTheme.ink2)
+                        .textFieldStyle(.plain)
+                }
             }
-
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: "text.quote")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(LisdoTheme.ink4)
-                    .frame(width: 16)
-                TextField("Why this reminder helps", text: reminderReasonBinding(at: index), axis: .vertical)
-                    .font(.system(size: 12))
-                    .textFieldStyle(.plain)
+            .padding(10)
+            .background(LisdoTheme.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(LisdoTheme.divider.opacity(0.8), lineWidth: 1)
             }
-        }
-        .padding(10)
-        .background(LisdoTheme.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(LisdoTheme.divider.opacity(0.8), lineWidth: 1)
-        }
     }
 
     private func reminderTitleBinding(at index: Int) -> Binding<String> {
@@ -482,6 +488,18 @@ struct DraftReviewView: View {
         for index in suggestedReminders.indices {
             suggestedReminders[index].order = index
         }
+    }
+
+    private func deleteBlock(at index: Int) {
+        guard blocks.indices.contains(index) else { return }
+        blocks.remove(at: index)
+        reorderBlocks()
+    }
+
+    private func deleteReminder(at index: Int) {
+        guard suggestedReminders.indices.contains(index) else { return }
+        suggestedReminders.remove(at: index)
+        reorderReminders()
     }
 
     private func saveAsTodo() {
@@ -527,6 +545,22 @@ struct DraftReviewView: View {
         }
     }
 
+    private func deleteDraft() {
+        let captureIds = CaptureDeletionPolicy.captureIdsToDelete(whenDeleting: draft, captures: captures)
+        for capture in captures where captureIds.contains(capture.id) {
+            modelContext.delete(capture)
+        }
+        modelContext.delete(draft)
+
+        do {
+            try modelContext.save()
+            onSaved()
+            dismiss()
+        } catch {
+            saveError = "Could not delete this draft. Try again after iCloud finishes syncing."
+        }
+    }
+
     @MainActor
     private func reviseDraft() async {
         let instructions = revisionInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -555,7 +589,8 @@ struct DraftReviewView: View {
                 timeZoneIdentifier: TimeZone.current.identifier
             )
 
-            let revised = try await provider.generateDraft(
+            let revised = try await TaskDraftProviderOutputRetry.generateDraft(
+                provider: provider,
                 input: input,
                 categories: categories,
                 options: TaskDraftProviderOptions(model: settings.model)

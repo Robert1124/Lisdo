@@ -38,11 +38,13 @@ public enum KeychainCredentialStoreError: Error, Equatable, Sendable {
     case emptySecret
     case encodingFailed
     case unexpectedData
+    case unsupportedSynchronizableAPIKeyMode(ProviderMode)
     case keychainStatus(OSStatus)
 }
 
 public final class KeychainCredentialStore: @unchecked Sendable {
     public static let defaultService = "com.yiwenwu.Lisdo.credentials"
+    public static let defaultSharedAccessGroup = "WDAN6HW5VM.com.yiwenwu.Lisdo.shared"
 
     private let service: String
     private let accessGroup: String?
@@ -66,7 +68,7 @@ public final class KeychainCredentialStore: @unchecked Sendable {
 
     public init(
         service: String = KeychainCredentialStore.defaultService,
-        accessGroup: String? = nil,
+        accessGroup: String? = KeychainCredentialStore.defaultSharedAccessGroup,
         userDefaults: UserDefaults = .standard
     ) {
         self.service = service
@@ -75,15 +77,17 @@ public final class KeychainCredentialStore: @unchecked Sendable {
     }
 
     public func saveOpenAICompatibleAPIKey(_ apiKey: String) throws {
-        try saveSecret(apiKey, account: Account.openAICompatibleAPIKey)
+        try saveSecret(apiKey, account: Account.openAICompatibleAPIKey, synchronization: .synced)
     }
 
     public func readOpenAICompatibleAPIKey() throws -> String? {
-        try readSecret(account: Account.openAICompatibleAPIKey)
+        try readSecret(account: Account.openAICompatibleAPIKey, synchronization: .synced)
+            ?? readSecret(account: Account.openAICompatibleAPIKey, synchronization: .local)
     }
 
     public func deleteOpenAICompatibleAPIKey() throws {
-        try deleteSecret(account: Account.openAICompatibleAPIKey)
+        try deleteSecret(account: Account.openAICompatibleAPIKey, synchronization: .synced)
+        try deleteSecret(account: Account.openAICompatibleAPIKey, synchronization: .local)
     }
 
     public func saveOpenAICompatibleSettings(endpointURL: URL, model: String) throws {
@@ -109,15 +113,42 @@ public final class KeychainCredentialStore: @unchecked Sendable {
     }
 
     public func saveAPIKey(_ apiKey: String, for mode: ProviderMode) throws {
-        try saveSecret(apiKey, account: Account.apiKey(for: mode))
+        let synchronization: KeychainSynchronization = Self.usesSynchronizableKeychain(for: mode) ? .synced : .local
+        try saveSecret(apiKey, account: Account.apiKey(for: mode), synchronization: synchronization)
     }
 
     public func readAPIKey(for mode: ProviderMode) throws -> String? {
-        try readSecret(account: Account.apiKey(for: mode))
+        if Self.usesSynchronizableKeychain(for: mode) {
+            return try readSyncedAPIKey(for: mode)
+                ?? readSecret(account: Account.apiKey(for: mode), synchronization: .local)
+        }
+
+        return try readSecret(account: Account.apiKey(for: mode), synchronization: .local)
     }
 
     public func deleteAPIKey(for mode: ProviderMode) throws {
-        try deleteSecret(account: Account.apiKey(for: mode))
+        try deleteSyncedAPIKey(for: mode)
+        try deleteSecret(account: Account.apiKey(for: mode), synchronization: .local)
+    }
+
+    public func saveSyncedAPIKey(_ apiKey: String, for mode: ProviderMode) throws {
+        guard Self.usesSynchronizableKeychain(for: mode) else {
+            throw KeychainCredentialStoreError.unsupportedSynchronizableAPIKeyMode(mode)
+        }
+
+        try saveSecret(apiKey, account: Account.apiKey(for: mode), synchronization: .synced)
+    }
+
+    public func readSyncedAPIKey(for mode: ProviderMode) throws -> String? {
+        guard Self.usesSynchronizableKeychain(for: mode) else {
+            return nil
+        }
+
+        return try readSecret(account: Account.apiKey(for: mode), synchronization: .synced)
+    }
+
+    public func deleteSyncedAPIKey(for mode: ProviderMode) throws {
+        try deleteSecret(account: Account.apiKey(for: mode), synchronization: .synced)
     }
 
     public func saveProviderSettings(_ settings: DraftProviderLocalSettings) throws {
@@ -141,7 +172,7 @@ public final class KeychainCredentialStore: @unchecked Sendable {
         deleteProviderSettings(for: mode)
     }
 
-    private func saveSecret(_ secret: String, account: String) throws {
+    private func saveSecret(_ secret: String, account: String, synchronization: KeychainSynchronization) throws {
         guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw KeychainCredentialStoreError.emptySecret
         }
@@ -150,9 +181,9 @@ public final class KeychainCredentialStore: @unchecked Sendable {
             throw KeychainCredentialStoreError.encodingFailed
         }
 
-        var query = baseQuery(account: account)
+        var query = baseQuery(account: account, synchronization: synchronization)
         query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        query[kSecAttrAccessible as String] = synchronization.accessibleAttribute
 
         SecItemDelete(query as CFDictionary)
         let status = SecItemAdd(query as CFDictionary, nil)
@@ -161,8 +192,8 @@ public final class KeychainCredentialStore: @unchecked Sendable {
         }
     }
 
-    private func readSecret(account: String) throws -> String? {
-        var query = baseQuery(account: account)
+    private func readSecret(account: String, synchronization: KeychainSynchronization) throws -> String? {
+        var query = baseQuery(account: account, synchronization: synchronization)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -184,19 +215,19 @@ public final class KeychainCredentialStore: @unchecked Sendable {
         return secret
     }
 
-    private func deleteSecret(account: String) throws {
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
+    private func deleteSecret(account: String, synchronization: KeychainSynchronization) throws {
+        let status = SecItemDelete(baseQuery(account: account, synchronization: synchronization) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainCredentialStoreError.keychainStatus(status)
         }
     }
 
-    private func baseQuery(account: String) -> [String: Any] {
+    private func baseQuery(account: String, synchronization: KeychainSynchronization) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecAttrSynchronizable as String: kCFBooleanFalse as Any
+            kSecAttrSynchronizable as String: synchronization.synchronizableAttribute
         ]
 
         if let accessGroup {
@@ -204,5 +235,37 @@ public final class KeychainCredentialStore: @unchecked Sendable {
         }
 
         return query
+    }
+
+    private static func usesSynchronizableKeychain(for mode: ProviderMode) -> Bool {
+        switch mode {
+        case .openAICompatibleBYOK, .minimax, .anthropic, .gemini, .openRouter:
+            return true
+        case .macOnlyCLI, .ollama, .lmStudio, .localModel:
+            return false
+        }
+    }
+}
+
+private enum KeychainSynchronization {
+    case local
+    case synced
+
+    var synchronizableAttribute: Any {
+        switch self {
+        case .local:
+            return kCFBooleanFalse as Any
+        case .synced:
+            return kCFBooleanTrue as Any
+        }
+    }
+
+    var accessibleAttribute: CFString {
+        switch self {
+        case .local:
+            return kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        case .synced:
+            return kSecAttrAccessibleAfterFirstUnlock
+        }
     }
 }

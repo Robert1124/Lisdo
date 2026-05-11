@@ -93,6 +93,10 @@ Then open `http://127.0.0.1:4173/`. English is the default; use `?lang=zh` for t
 - `LisdoCore` owns shared models, draft parsing, provider contracts, fallback logic, draft-to-todo conversion, and testable state transitions.
 - Platform targets own SwiftUI screens, Vision OCR adapters, Keychain implementation, model container wiring, and extension integration.
 
+## Sponsor
+
+Lisdo is open source. If the project helps you, you can support development through [GitHub Sponsors](https://github.com/sponsors/Robert1124).
+
 ## License
 
 Lisdo is open source under the MIT License. See [LICENSE](LICENSE).

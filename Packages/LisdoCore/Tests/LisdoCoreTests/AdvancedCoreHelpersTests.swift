@@ -100,6 +100,84 @@ final class AdvancedCoreHelpersTests: XCTestCase {
         XCTAssertEqual(open.status, .open)
     }
 
+    func testTrashPolicySoftDeletesTodosAndPurgesAfterThirtyDays() {
+        let now = date(year: 2026, month: 5, day: 10)
+        let deletedAt = date(year: 2026, month: 4, day: 5)
+        let expired = Todo(categoryId: "work", title: "Expired trash", status: .trashed, updatedAt: deletedAt)
+        let recent = Todo(categoryId: "work", title: "Recent trash", status: .trashed, updatedAt: date(year: 2026, month: 4, day: 20))
+        let active = Todo(categoryId: "work", title: "Active", status: .open)
+
+        let trashed = TodoTrashPolicy.moveToTrash([active], trashedAt: now)
+
+        XCTAssertEqual(trashed.map(\.id), [active.id])
+        XCTAssertEqual(active.status, .trashed)
+        XCTAssertEqual(active.updatedAt, now)
+        XCTAssertEqual(TodoTrashPolicy.expiredTrashedTodos([expired, recent, active], now: now).map(\.id), [expired.id])
+    }
+
+    func testCategorySmartListsExposeArchiveAndTrashInsteadOfCapturedWithoutDraft() {
+        let smartLists = LisdoCategorySmartListKind.defaultKinds
+
+        XCTAssertEqual(smartLists.map(\.title), ["Today", "AI Drafts", "Archive", "Trash", "Needs attention"])
+        XCTAssertFalse(smartLists.map(\.title).contains("Captured without draft"))
+    }
+
+    func testHostedProviderQueuePolicyIncludesIPhonePendingMediaWithoutOCRText() {
+        let screenshot = CaptureItem(
+            sourceType: .screenshotImport,
+            sourceImageAssetId: "shared-screenshot.png",
+            createdDevice: .iPhone,
+            status: .pendingProcessing,
+            preferredProviderMode: .minimax
+        )
+        let macCLI = CaptureItem(
+            sourceType: .screenshotImport,
+            sourceImageAssetId: "mac-cli.png",
+            createdDevice: .iPhone,
+            status: .pendingProcessing,
+            preferredProviderMode: .macOnlyCLI
+        )
+        let macHosted = CaptureItem(
+            sourceType: .screenshotImport,
+            sourceImageAssetId: "mac-hosted.png",
+            createdDevice: .mac,
+            status: .pendingProcessing,
+            preferredProviderMode: .openAICompatibleBYOK
+        )
+
+        XCTAssertTrue(HostedProviderQueuePolicy.isIPhoneHostedPendingCandidate(screenshot))
+        XCTAssertFalse(HostedProviderQueuePolicy.isIPhoneHostedPendingCandidate(macCLI))
+        XCTAssertFalse(HostedProviderQueuePolicy.isIPhoneHostedPendingCandidate(macHosted))
+    }
+
+    func testHostedProviderQueuePolicyDoesNotRetryProcessingOrFailedCapturesAutomatically() {
+        let processing = CaptureItem(
+            sourceType: .textPaste,
+            sourceText: "Task",
+            createdDevice: .iPhone,
+            status: .processing,
+            preferredProviderMode: .openAICompatibleBYOK
+        )
+        let failed = CaptureItem(
+            sourceType: .textPaste,
+            sourceText: "Task",
+            createdDevice: .iPhone,
+            status: .failed,
+            preferredProviderMode: .openAICompatibleBYOK
+        )
+        let retry = CaptureItem(
+            sourceType: .textPaste,
+            sourceText: "Task",
+            createdDevice: .iPhone,
+            status: .retryPending,
+            preferredProviderMode: .openAICompatibleBYOK
+        )
+
+        XCTAssertFalse(HostedProviderQueuePolicy.isIPhoneHostedPendingCandidate(processing))
+        XCTAssertFalse(HostedProviderQueuePolicy.isIPhoneHostedPendingCandidate(failed))
+        XCTAssertTrue(HostedProviderQueuePolicy.isIPhoneHostedPendingCandidate(retry))
+    }
+
     func testSavedTodoCompletionToggleUpdatesStatusTimestampAndBlocks() {
         let toggleDate = date(year: 2026, month: 5, day: 4, hour: 9)
         let firstBlock = TodoBlock(todoId: UUID(), type: .checkbox, content: "First", checked: false, order: 0)

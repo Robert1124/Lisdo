@@ -4,14 +4,31 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum LisdoMacCaptureInitialAction {
+    case text
+    case selectedArea
+}
+
+struct LisdoMacCaptureRequest: Identifiable {
+    let id = UUID()
+    var initialAction: LisdoMacCaptureInitialAction
+}
+
+private enum LisdoMacQuickCaptureMode {
+    case text
+    case voice
+}
+
 struct LisdoCaptureSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
     let categories: [Category]
+    let initialAction: LisdoMacCaptureInitialAction
 
-    @StateObject private var voiceRecorder = MacVoiceRecordingService()
+    @StateObject private var voiceRecorder = MacLiveVoiceTranscriptionService()
 
+    @State private var quickCaptureMode: LisdoMacQuickCaptureMode = .text
     @State private var captureText = ""
     @State private var userNote = ""
     @State private var selectedCategoryId: String
@@ -27,72 +44,377 @@ struct LisdoCaptureSheet: View {
     @State private var voiceTranscript = ""
     @State private var voiceLanguageCode: String?
     @State private var lastVoiceRecordingURL: URL?
+    @State private var voiceRecordingLimitTask: Task<Void, Never>?
+    @State private var voiceElapsedTask: Task<Void, Never>?
+    @State private var voiceElapsedSeconds = 0
     @State private var isCapturingScreen = false
     @State private var isSelectingScreenRegion = false
     @State private var screenRegionX = 0.0
     @State private var screenRegionY = 0.0
     @State private var screenRegionWidth = 900.0
     @State private var screenRegionHeight = 620.0
-    @AppStorage(LisdoCaptureModePreferences.imageProcessingModeKey)
-    private var imageProcessingModeRawValue = LisdoImageProcessingMode.directLLM.rawValue
-    @AppStorage(LisdoCaptureModePreferences.voiceProcessingModeKey)
-    private var voiceProcessingModeRawValue = LisdoVoiceProcessingMode.directLLM.rawValue
+    @State private var hiddenWindowsForScreenSelection: [NSWindow] = []
+    @Query(sort: \LisdoSyncedSettings.updatedAt, order: .reverse) private var syncedSettings: [LisdoSyncedSettings]
+    @State private var selectedProviderMode: ProviderMode = .openAICompatibleBYOK
+    @State private var imageProcessingModeRawValue = LisdoSyncedSettings.defaultImageProcessingModeRawValue
+    @State private var voiceProcessingModeRawValue = LisdoSyncedSettings.defaultVoiceProcessingModeRawValue
+    @State private var didRunInitialAction = false
 
     private let speechService = MacSpeechTranscriptionService()
 
-    init(categories: [Category]) {
+    init(categories: [Category], initialAction: LisdoMacCaptureInitialAction = .text) {
         self.categories = categories
+        self.initialAction = initialAction
         _selectedCategoryId = State(initialValue: categories.defaultCategoryId)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    textCapture
-                    voiceCapture
-                    imageCapture
-                    systemCaptureSources
-                }
-                .padding(20)
-            }
-            .background(LisdoMacTheme.surface)
-            Divider()
-            footer
+            quickCaptureSurface
         }
         .fileImporter(isPresented: $showsImageImporter, allowedContentTypes: [.image]) { result in
             handleImageImport(result)
         }
+        .background(LisdoMacTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .onAppear {
+            loadSyncedSettings()
+            runInitialActionIfNeeded()
+        }
+        .onChange(of: syncedSettingsSnapshot) { _, _ in
+            loadSyncedSettings()
+        }
         .onDisappear {
+            cancelVoiceRecordingLimit()
+            cancelVoiceElapsedTimer()
             voiceRecorder.discardRecording()
-            if let lastVoiceRecordingURL {
-                voiceRecorder.discardRecording(at: lastVoiceRecordingURL)
-            }
         }
     }
 
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: "plus")
-                .frame(width: 30, height: 30)
-                .background(LisdoMacTheme.ink1, in: RoundedRectangle(cornerRadius: 8))
-                .foregroundStyle(LisdoMacTheme.onAccent)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Quick capture")
-                    .font(.headline)
-                Text("Capture now, review the AI draft before saving a todo.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Quick capture")
+                .font(.title3.weight(.semibold))
             Spacer()
-            Button("Close") {
+            Button {
                 dismiss()
+            } label: {
+                Text("Cancel")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(LisdoMacTheme.surface2.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(LisdoMacTheme.divider.opacity(0.65))
+                    }
             }
             .keyboardShortcut(.cancelAction)
+            .buttonStyle(.plain)
         }
-        .padding(18)
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        .padding(.bottom, 8)
+    }
+
+    private var quickCaptureSurface: some View {
+        Group {
+            switch quickCaptureMode {
+            case .text:
+                textQuickCaptureSurface
+            case .voice:
+                voiceQuickCaptureSurface
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 20)
+    }
+
+    private var textQuickCaptureSurface: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $captureText)
+                    .font(.body)
+                    .frame(minHeight: 150)
+                    .scrollContentBackground(.hidden)
+                    .padding(12)
+                    .background(LisdoMacTheme.surface2, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [6, 5]))
+                            .foregroundStyle(LisdoMacTheme.divider.opacity(0.82))
+                    }
+
+                if captureText.lisdoTrimmed.isEmpty {
+                    Text("Paste text, type a thought, or add copied notes...")
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 20)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            HStack(spacing: 12) {
+                quickCaptureSourceButton("Voice", systemImage: "mic") {
+                    enterVoiceCapture()
+                }
+
+                quickCaptureSourceButton(isSelectingScreenRegion || isCapturingScreen ? "Reading" : "Area", systemImage: "crop") {
+                    Task {
+                        await selectScreenRegionAndCapture()
+                    }
+                }
+                .disabled(isSelectingScreenRegion || isCapturingScreen || isProcessingText || isProcessingVoice || isRecognizingImage)
+
+                quickCaptureSourceButton("Photo", systemImage: "photo.on.rectangle") {
+                    showsImageImporter = true
+                }
+                .disabled(isRecognizingImage || isProcessingText || isProcessingVoice || isCapturingScreen || isSelectingScreenRegion)
+            }
+
+            if let importedImageName {
+                Label(importedImageName, systemImage: "photo")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            LisdoCaptureStatusBanner(
+                title: statusTitle,
+                message: statusMessage ?? "Captured input becomes a reviewable draft before it can become a todo.",
+                tone: statusTone,
+                showsProgress: isRecognizingImage || isProcessingText || isProcessingVoice || isTranscribingVoice || isCapturingScreen || isSelectingScreenRegion
+            )
+
+            Button {
+                Task {
+                    await captureTypedText()
+                }
+            } label: {
+                Label(organizeButtonTitle, systemImage: "sparkles")
+                    .font(.headline)
+                    .foregroundStyle(canOrganize && !isVoiceBusy ? LisdoMacTheme.onAccent : LisdoMacTheme.ink4)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(canOrganize && !isVoiceBusy ? LisdoMacTheme.ink1 : LisdoMacTheme.surface3, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canOrganize || isVoiceBusy)
+        }
+    }
+
+    private var voiceQuickCaptureSurface: some View {
+        VStack(spacing: 18) {
+            Spacer(minLength: 4)
+
+            LisdoMacVoiceWaveform(isActive: voiceRecorder.isRecording)
+                .frame(width: 180, height: 74)
+                .foregroundStyle(voiceRecorder.isRecording ? LisdoMacTheme.ink1 : LisdoMacTheme.ink3)
+
+            Text(voiceElapsedText)
+                .font(.system(size: 38, weight: .regular, design: .rounded))
+                .monospacedDigit()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Transcript")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                TextField("Transcript appears after recording stops...", text: $voiceTranscript, axis: .vertical)
+                    .lineLimit(3...6)
+                    .textFieldStyle(.plain)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(LisdoMacTheme.surface2, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(LisdoMacTheme.divider.opacity(0.78))
+                    }
+            }
+            .frame(maxWidth: .infinity)
+
+            LisdoCaptureStatusBanner(
+                title: statusTitle,
+                message: statusMessage ?? "Speak naturally. Lisdo will transcribe the full recording after you stop.",
+                tone: statusTone,
+                showsProgress: voiceRecorder.isRecording || isTranscribingVoice || isProcessingVoice
+            )
+
+            HStack(spacing: 24) {
+                Button {
+                    discardVoiceCapture()
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 42, height: 42)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Close voice capture")
+
+                voicePrimaryButton
+
+                Button {
+                    Task {
+                        await restartVoiceRecording()
+                    }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 42, height: 42)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(isVoiceBusy && !voiceRecorder.isRecording)
+                .help("Record again")
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(minHeight: 360)
+    }
+
+    @ViewBuilder
+    private var voicePrimaryButton: some View {
+        if !voiceRecorder.isRecording, !voiceTranscript.lisdoTrimmed.isEmpty {
+            Button {
+                submitVoiceTranscriptAndDismiss()
+            } label: {
+                Label("Organize", systemImage: "sparkles")
+                    .font(.headline)
+                    .foregroundStyle(LisdoMacTheme.onAccent)
+                    .frame(width: 180, height: 44)
+                    .background(LisdoMacTheme.ink1, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isProcessingVoice || isTranscribingVoice)
+            .keyboardShortcut(.defaultAction)
+        } else {
+            Button {
+                Task {
+                    await handleVoiceRecordButton()
+                }
+            } label: {
+                Image(systemName: voiceRecorder.isRecording ? "stop.fill" : "mic.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(LisdoMacTheme.onAccent)
+                    .frame(width: 66, height: 66)
+                    .background(LisdoMacTheme.ink1, in: Circle())
+                    .overlay {
+                        Circle()
+                            .strokeBorder(LisdoMacTheme.surface, lineWidth: 4)
+                    }
+                    .shadow(color: .black.opacity(0.22), radius: 12, y: 5)
+            }
+            .buttonStyle(.plain)
+            .disabled(isProcessingVoice || isTranscribingVoice)
+            .keyboardShortcut(.defaultAction)
+            .help(voiceRecorder.isRecording ? "Stop recording" : "Start recording")
+        }
+    }
+
+    private func quickCaptureSourceButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 22, weight: .semibold))
+                Text(title)
+                    .font(.callout.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 82)
+            .foregroundStyle(.primary)
+            .background(LisdoMacTheme.surface3, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(LisdoMacTheme.divider.opacity(0.65))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var organizeButtonTitle: String {
+        if isProcessingText || isProcessingVoice || isRecognizingImage || isCapturingScreen || isSelectingScreenRegion {
+            return "Organizing"
+        }
+        return "Organize into a draft"
+    }
+
+    private var canOrganize: Bool {
+        !captureText.lisdoTrimmed.isEmpty
+    }
+
+    private func runInitialActionIfNeeded() {
+        guard !didRunInitialAction else { return }
+        didRunInitialAction = true
+        guard initialAction == .selectedArea else { return }
+        Task {
+            await selectScreenRegionAndCapture()
+        }
+    }
+
+    @MainActor
+    private func enterVoiceCapture() {
+        discardVoiceCapture()
+        quickCaptureMode = .voice
+        setStatus(
+            title: "Voice capture",
+            message: "Press record and speak naturally. Lisdo will live-transcribe English or Chinese, then send the transcript as a draft.",
+            tone: .idle
+        )
+    }
+
+    @MainActor
+    private func handleVoiceRecordButton() async {
+        if voiceRecorder.isRecording {
+            await stopRecordingAndTranscribe()
+        } else {
+            await startVoiceRecording()
+        }
+    }
+
+    @MainActor
+    private func restartVoiceRecording() async {
+        discardVoiceCapture()
+        quickCaptureMode = .voice
+        await startVoiceRecording()
+    }
+
+    @MainActor
+    private func submitVoiceTranscriptAndDismiss() {
+        let trimmedTranscript = voiceTranscript.lisdoTrimmed
+        guard !trimmedTranscript.isEmpty else { return }
+
+        let transcriptLanguage = voiceLanguageCode
+        let trimmedNote = userNote.lisdoTrimmed.nilIfEmpty
+        let categoryId = selectedCategoryId
+        let categorySnapshot = categories
+        voiceTranscript = ""
+        voiceLanguageCode = nil
+        userNote = ""
+        dismiss()
+
+        Task { @MainActor in
+            _ = await LisdoMacMVP2Processing.processExtractedCapture(
+                sourceType: .voiceNote,
+                transcriptText: trimmedTranscript,
+                transcriptLanguage: transcriptLanguage,
+                sourceAudioAssetId: nil,
+                userNote: trimmedNote,
+                selectedCategoryId: categoryId,
+                categories: categorySnapshot,
+                modelContext: modelContext
+            )
+        }
+    }
+
+    private var voiceElapsedText: String {
+        let minutes = voiceElapsedSeconds / 60
+        let seconds = voiceElapsedSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 
     private var textCapture: some View {
@@ -130,7 +452,7 @@ struct LisdoCaptureSheet: View {
             .pickerStyle(.menu)
 
             HStack(spacing: 6) {
-                LisdoChip(title: "Mode: \(LisdoMacMVP2Processing.providerModeLabel)", systemImage: "cpu")
+                LisdoChip(title: "Mode: \(providerModeLabel)", systemImage: "cpu")
                 Text("Provider output always lands as a draft for review.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -188,7 +510,6 @@ struct LisdoCaptureSheet: View {
                     .font(.headline)
                 Spacer()
                 LisdoChip(title: "Transcript review", systemImage: "text.bubble")
-                    .opacity(voiceProcessingMode == .speechTranscript ? 1 : 0)
             }
 
             HStack(alignment: .top, spacing: 12) {
@@ -243,8 +564,7 @@ struct LisdoCaptureSheet: View {
                 }
             }
 
-            if voiceProcessingMode == .speechTranscript {
-                VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Transcript review")
                         .font(.caption.weight(.medium))
@@ -276,7 +596,7 @@ struct LisdoCaptureSheet: View {
                     } label: {
                         Label(
                             isProcessingVoice ? "Organizing" : "Create Draft from Transcript",
-                            systemImage: LisdoMacMVP2Processing.providerMode == .macOnlyCLI ? "desktopcomputer" : "sparkles"
+                            systemImage: selectedProviderMode == .macOnlyCLI ? "desktopcomputer" : "sparkles"
                         )
                     }
                     .buttonStyle(.bordered)
@@ -289,14 +609,6 @@ struct LisdoCaptureSheet: View {
             }
             .padding(12)
             .background(LisdoMacTheme.surface2, in: RoundedRectangle(cornerRadius: 12))
-            } else {
-                Text("Stopping the recording sends the temporary audio file to the selected provider. Review still happens in the resulting draft.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(LisdoMacTheme.surface2, in: RoundedRectangle(cornerRadius: 12))
-            }
         }
         .padding(16)
         .background(LisdoMacTheme.surface, in: RoundedRectangle(cornerRadius: 14))
@@ -324,7 +636,7 @@ struct LisdoCaptureSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    LisdoChip(title: LisdoMacMVP2Processing.providerModeLabel, systemImage: "cpu")
+                    LisdoChip(title: providerModeLabel, systemImage: "cpu")
                 }
 
                 Text(imageProcessingMode == .directLLM ? "Drag across the screen to choose the exact area Lisdo should send as an image attachment. Provider output is still stored as a reviewable draft." : "Drag across the screen to choose the exact area Lisdo should read. Lisdo runs Vision OCR, then stores provider output as a reviewable draft.")
@@ -491,7 +803,7 @@ struct LisdoCaptureSheet: View {
         isProcessingText = true
         setStatus(
             title: "Creating draft",
-            message: "Organizing text with \(LisdoMacMVP2Processing.providerModeLabel). Review is required before saving a todo.",
+            message: "Organizing text with \(LisdoMacMVP2Processing.providerModeLabel(modelContext: modelContext)). Review is required before saving a todo.",
             tone: .processing
         )
         defer { isProcessingText = false }
@@ -513,18 +825,16 @@ struct LisdoCaptureSheet: View {
     private func startVoiceRecording() async {
         voiceTranscript = ""
         voiceLanguageCode = nil
-        if let lastVoiceRecordingURL {
-            voiceRecorder.discardRecording(at: lastVoiceRecordingURL)
-            self.lastVoiceRecordingURL = nil
-        }
+        lastVoiceRecordingURL = nil
+        voiceElapsedSeconds = 0
 
         do {
-            try await voiceRecorder.startRecording()
+            try await voiceRecorder.startRecording { _ in }
+            scheduleVoiceRecordingLimit()
+            startVoiceElapsedTimer()
             setStatus(
                 title: "Recording voice",
-                message: voiceProcessingMode == .directLLM
-                    ? "Speak naturally. Stop recording to send the audio to the selected provider for a reviewable draft."
-                    : "Speak naturally. Stop recording to create an editable transcript before any draft is generated.",
+                message: "Speak naturally. Lisdo will transcribe the full recording after you stop, and will stop automatically after 1 minute.",
                 tone: .processing
             )
         } catch {
@@ -537,31 +847,25 @@ struct LisdoCaptureSheet: View {
     }
 
     @MainActor
-    private func stopRecordingAndTranscribe() async {
-        if voiceProcessingMode == .directLLM {
-            await stopRecordingAndSendAudioToProvider()
-            return
-        }
-
+    private func stopRecordingAndTranscribe(limitReached: Bool = false) async {
+        cancelVoiceRecordingLimit()
+        cancelVoiceElapsedTimer()
         do {
-            let recordingURL = try voiceRecorder.stopRecording()
-            lastVoiceRecordingURL = recordingURL
             isTranscribingVoice = true
             setStatus(
-                title: "Transcribing voice",
-                message: "Speech recognition is creating a transcript for review. Audio remains in a temporary local file.",
+                title: limitReached ? "Recording limit reached" : "Transcribing voice",
+                message: limitReached
+                    ? "Voice captures are limited to 1 minute. Lisdo is finalizing the transcript for review."
+                    : "Lisdo is finalizing the transcript before draft creation.",
                 tone: .processing
             )
             defer { isTranscribingVoice = false }
 
-            try await ensureSpeechRecognitionPermission()
-            let result = try await speechService.transcribeAudioFile(at: recordingURL)
+            let result = try await voiceRecorder.stopAndTranscribe()
             voiceTranscript = result.transcript
-            voiceLanguageCode = Locale.current.identifier
-            voiceRecorder.discardRecording(at: recordingURL)
-            lastVoiceRecordingURL = nil
+            voiceLanguageCode = result.languageCode
             setStatus(
-                title: "Transcript ready",
+                title: limitReached ? "1-minute transcript ready" : "Transcript ready",
                 message: "Review or edit the transcript, then create a draft. The temporary audio file was discarded.",
                 tone: .success
             )
@@ -575,47 +879,6 @@ struct LisdoCaptureSheet: View {
     }
 
     @MainActor
-    private func stopRecordingAndSendAudioToProvider() async {
-        do {
-            let recordingURL = try voiceRecorder.stopRecording()
-            lastVoiceRecordingURL = recordingURL
-            isProcessingVoice = true
-            setStatus(
-                title: "Sending audio",
-                message: "The selected provider will transcribe and organize this audio into a draft for review.",
-                tone: .processing
-            )
-            defer { isProcessingVoice = false }
-
-            let audioData = try Data(contentsOf: recordingURL)
-            let outcome = await LisdoMacMVP2Processing.processExtractedCapture(
-                sourceType: .voiceNote,
-                sourceText: "Audio attachment included for direct provider analysis.",
-                sourceAudioAssetId: recordingURL.lastPathComponent,
-                audioAttachment: TaskDraftAudioAttachment(
-                    data: audioData,
-                    format: audioFormat(for: recordingURL),
-                    filename: recordingURL.lastPathComponent
-                ),
-                userNote: userNote.lisdoTrimmed.nilIfEmpty,
-                selectedCategoryId: selectedCategoryId,
-                categories: categories,
-                modelContext: modelContext
-            )
-            voiceRecorder.discardRecording(at: recordingURL)
-            lastVoiceRecordingURL = nil
-            userNote = ""
-            setStatus(outcome)
-        } catch {
-            setStatus(
-                title: "Audio capture failed",
-                message: "No capture was saved. \(error.localizedDescription)",
-                tone: .failure
-            )
-        }
-    }
-
-    @MainActor
     private func submitVoiceTranscript() async {
         let trimmedTranscript = voiceTranscript.lisdoTrimmed
         guard !trimmedTranscript.isEmpty else { return }
@@ -623,7 +886,7 @@ struct LisdoCaptureSheet: View {
         isProcessingVoice = true
         setStatus(
             title: "Creating draft",
-            message: "Organizing the reviewed transcript with \(LisdoMacMVP2Processing.providerModeLabel). Review is required before saving a todo.",
+            message: "Organizing the reviewed transcript with \(LisdoMacMVP2Processing.providerModeLabel(modelContext: modelContext)). Review is required before saving a todo.",
             tone: .processing
         )
         defer { isProcessingVoice = false }
@@ -652,18 +915,62 @@ struct LisdoCaptureSheet: View {
 
     @MainActor
     private func discardVoiceCapture() {
+        cancelVoiceRecordingLimit()
+        cancelVoiceElapsedTimer()
         voiceRecorder.discardRecording()
-        if let lastVoiceRecordingURL {
-            voiceRecorder.discardRecording(at: lastVoiceRecordingURL)
-            self.lastVoiceRecordingURL = nil
-        }
+        lastVoiceRecordingURL = nil
         voiceTranscript = ""
         voiceLanguageCode = nil
+        voiceElapsedSeconds = 0
         setStatus(
             title: "Voice discarded",
             message: "No audio, transcript, draft, or todo was saved from that voice capture.",
             tone: .idle
         )
+    }
+
+    @MainActor
+    private func scheduleVoiceRecordingLimit() {
+        cancelVoiceRecordingLimit()
+        voiceRecordingLimitTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: LisdoVoiceCapturePolicy.maximumDurationNanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, voiceRecorder.isRecording else { return }
+            await stopRecordingAndTranscribe(limitReached: true)
+        }
+    }
+
+    @MainActor
+    private func cancelVoiceRecordingLimit() {
+        voiceRecordingLimitTask?.cancel()
+        voiceRecordingLimitTask = nil
+    }
+
+    @MainActor
+    private func startVoiceElapsedTimer() {
+        cancelVoiceElapsedTimer()
+        voiceElapsedTask = Task { @MainActor in
+            while !Task.isCancelled,
+                  voiceRecorder.isRecording,
+                  voiceElapsedSeconds < Int(LisdoVoiceCapturePolicy.maximumDurationSeconds) {
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, voiceRecorder.isRecording else { return }
+                voiceElapsedSeconds += 1
+            }
+        }
+    }
+
+    @MainActor
+    private func cancelVoiceElapsedTimer() {
+        voiceElapsedTask?.cancel()
+        voiceElapsedTask = nil
     }
 
     private var isVoiceBusy: Bool {
@@ -773,7 +1080,7 @@ struct LisdoCaptureSheet: View {
                     userNote: trimmedNote.isEmpty ? "Image import failed before a draft was created." : trimmedNote,
                     createdDevice: .mac
                 ),
-                providerMode: LisdoMacMVP2Processing.providerMode,
+                providerMode: LisdoMacMVP2Processing.providerMode(modelContext: modelContext),
                 reason: .textRecognitionFailed(error.localizedDescription)
             )
             modelContext.insert(item)
@@ -837,6 +1144,10 @@ struct LisdoCaptureSheet: View {
         )
 
         let selection: MacScreenRegionSelection
+        hideLisdoWindowsForScreenSelection()
+        defer {
+            restoreLisdoWindowsAfterScreenSelection()
+        }
         do {
             selection = try await MacScreenRegionSelector.selectRegion()
         } catch MacScreenRegionSelectionError.cancelled {
@@ -943,7 +1254,7 @@ struct LisdoCaptureSheet: View {
                     userNote: userNote.lisdoTrimmed.nilIfEmpty,
                     createdDevice: .mac
                 ),
-                providerMode: LisdoMacMVP2Processing.providerMode,
+                providerMode: LisdoMacMVP2Processing.providerMode(modelContext: modelContext),
                 reason: .textRecognitionFailed(error.localizedDescription)
             )
             modelContext.insert(item)
@@ -998,6 +1309,36 @@ struct LisdoCaptureSheet: View {
         statusTone = tone
     }
 
+    private var syncedSettingsSnapshot: String {
+        guard let settings = syncedSettings.first else {
+            return "missing"
+        }
+
+        return [
+            settings.selectedProviderMode.rawValue,
+            settings.imageProcessingModeRawValue,
+            settings.voiceProcessingModeRawValue,
+            String(settings.updatedAt.timeIntervalSinceReferenceDate)
+        ].joined(separator: "|")
+    }
+
+    private func loadSyncedSettings() {
+        do {
+            let settings = try LisdoMacMVP2Processing.syncedSettings(modelContext: modelContext)
+            selectedProviderMode = settings.selectedProviderMode
+            imageProcessingModeRawValue = settings.imageProcessingModeRawValue
+            voiceProcessingModeRawValue = settings.voiceProcessingModeRawValue
+        } catch {
+            selectedProviderMode = LisdoMacMVP2Processing.providerMode(modelContext: modelContext)
+            imageProcessingModeRawValue = LisdoMacMVP2Processing.imageProcessingMode(modelContext: modelContext).rawValue
+            voiceProcessingModeRawValue = LisdoMacMVP2Processing.voiceProcessingMode(modelContext: modelContext).rawValue
+        }
+    }
+
+    private var providerModeLabel: String {
+        DraftProviderFactory.metadata(for: selectedProviderMode).displayName
+    }
+
     private var imageProcessingMode: LisdoImageProcessingMode {
         LisdoImageProcessingMode(rawValue: imageProcessingModeRawValue) ?? .visionOCR
     }
@@ -1010,11 +1351,11 @@ struct LisdoCaptureSheet: View {
         if voiceRecorder.isRecording {
             return "Recording on this Mac"
         }
-        return voiceProcessingMode == .directLLM ? "Record, send audio, then review" : "Record, transcribe, then review"
+        return "Record, transcribe, then review"
     }
 
     private var voiceStopButtonTitle: String {
-        voiceProcessingMode == .directLLM ? "Stop and Send Audio" : "Stop and Transcribe"
+        "Stop and Transcribe"
     }
 
     private func imageMimeType(for url: URL) -> String {
@@ -1026,9 +1367,45 @@ struct LisdoCaptureSheet: View {
         return mimeType
     }
 
-    private func audioFormat(for url: URL) -> String {
-        let ext = url.pathExtension.lisdoTrimmed.lowercased()
-        return ext.isEmpty ? "m4a" : ext
+    private func hideLisdoWindowsForScreenSelection() {
+        hiddenWindowsForScreenSelection = NSApp.windows.filter { window in
+            window.isVisible && window.level.rawValue < NSWindow.Level.screenSaver.rawValue
+        }
+        hiddenWindowsForScreenSelection.forEach { window in
+            window.orderOut(nil)
+        }
+    }
+
+    private func restoreLisdoWindowsAfterScreenSelection() {
+        hiddenWindowsForScreenSelection.forEach { window in
+            window.makeKeyAndOrderFront(nil)
+        }
+        hiddenWindowsForScreenSelection = []
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+}
+
+private struct LisdoMacVoiceWaveform: View {
+    var isActive: Bool
+
+    private let bars: [CGFloat] = [0.58, 0.76, 1.0, 0.82, 0.62, 0.46, 0.34, 0.28, 0.42, 0.56, 0.72, 0.84, 0.68, 0.54, 0.66, 0.78, 0.94, 0.72]
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 4) {
+            ForEach(Array(bars.enumerated()), id: \.offset) { index, height in
+                Capsule()
+                    .frame(width: 4, height: 54 * height)
+                    .opacity(isActive ? (index.isMultiple(of: 2) ? 1 : 0.72) : 0.35)
+                    .animation(
+                        isActive
+                            ? .easeInOut(duration: 0.55 + Double(index % 4) * 0.08).repeatForever(autoreverses: true)
+                            : .default,
+                        value: isActive
+                    )
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 

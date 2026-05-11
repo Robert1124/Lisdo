@@ -13,6 +13,7 @@ struct PlanView: View {
     @State private var planMessage: String?
     @State private var selectedMode: PlanCalendarMode = .week
     @State private var selectedDate: Date = Date()
+    @State private var selectedTodoDetail: PlanTodoDetailSelection?
 
     private let calendar = Calendar.current
     private var now: Date { Date() }
@@ -32,13 +33,26 @@ struct PlanView: View {
         }
         .background(LisdoTheme.surface)
         .navigationTitle("Plan")
+        .sheet(item: $selectedTodoDetail) { selection in
+            if let todo = todos.first(where: { $0.id == selection.todoID }) {
+                TodoDetailSheet(
+                    todo: todo,
+                    categories: categories,
+                    openPomodoro: openPomodoro
+                )
+                .presentationDetents([.fraction(0.78), .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(LisdoTheme.surface)
+            } else {
+                PlanMissingTodoDetailView()
+                    .presentationDetents([.medium])
+                    .presentationBackground(LisdoTheme.surface)
+            }
+        }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("Plan")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(LisdoTheme.ink1)
             Text("Lisdo-only due and scheduled work. No Calendar or Reminders sync.")
                 .font(.system(size: 13))
                 .foregroundStyle(LisdoTheme.ink3)
@@ -48,13 +62,10 @@ struct PlanView: View {
 
     private var calendarBand: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("Plan view", selection: $selectedMode) {
-                ForEach(PlanCalendarMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            LisdoSegmentedControl(
+                selection: $selectedMode,
+                options: PlanCalendarMode.allCases.map { ($0, $0.label) }
+            )
 
             HStack(spacing: 10) {
                 Button {
@@ -64,6 +75,7 @@ struct PlanView: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(LisdoTheme.ink2)
                 .accessibilityLabel("Previous \(selectedMode.label)")
 
                 Text(periodTitle)
@@ -79,6 +91,7 @@ struct PlanView: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(LisdoTheme.ink2)
                 .accessibilityLabel("Next \(selectedMode.label)")
             }
 
@@ -165,17 +178,10 @@ struct PlanView: View {
     }
 
     private var planSummary: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                PlanMetricView(icon: "checkmark.circle", value: "\(plan.activeTodoCount)", label: "active")
-                PlanMetricView(icon: "exclamationmark.circle", value: "\(bucketCount(.overdue))", label: "overdue")
-                PlanMetricView(icon: "tray", value: "\(bucketCount(.noDate))", label: "no date")
-            }
-
-            HStack(spacing: 10) {
-                PrioritySummaryView(summary: plan.prioritySummary)
-                CategorySummaryView(summaries: plan.categorySummaries)
-            }
+        HStack(spacing: 10) {
+            PlanMetricView(icon: "checkmark.circle", value: "\(plan.activeTodoCount)", label: "active")
+            PlanMetricView(icon: "exclamationmark.circle", value: "\(bucketCount(.overdue))", label: "overdue")
+            PlanMetricView(icon: "tray", value: "\(bucketCount(.noDate))", label: "no date")
         }
     }
 
@@ -201,8 +207,8 @@ struct PlanView: View {
                             categoryName: categoryName(for: item.todo.categoryId),
                             calendar: calendar,
                             now: now,
+                            onOpen: { selectedTodoDetail = PlanTodoDetailSelection(todoID: item.todo.id) },
                             onStartFocus: { startPomodoro(item.todo) },
-                            onToggleCompletion: { toggleCompletion(item.todo) },
                             onDelete: { deleteTodo(item.todo) }
                         )
                     }
@@ -347,10 +353,13 @@ struct PlanView: View {
             return
         }
 
-        modelContext.delete(todo)
+        TodoTrashPolicy.moveToTrash([todo])
         do {
             try modelContext.save()
-            planMessage = "Deleted todo."
+            planMessage = "Todo moved to Trash."
+            Task { @MainActor in
+                await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
+            }
         } catch {
             planMessage = "Could not delete todo: \(error.localizedDescription)"
         }
@@ -494,19 +503,17 @@ private struct PlanTodoRow: View {
     let categoryName: String
     let calendar: Calendar
     let now: Date
+    var onOpen: () -> Void
     var onStartFocus: () -> Void
-    var onToggleCompletion: () -> Void
     var onDelete: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Button(action: onToggleCompletion) {
-                    TodoStatusMark(status: todo.status)
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(todo.status == .completed ? "Reopen todo" : "Complete todo")
+            HStack(alignment: .top, spacing: 9) {
+                TodoStatusMark(status: todo.status)
+                    .frame(width: 22, height: 22)
+                    .accessibilityHidden(true)
+                .padding(.top, 1)
 
                 Text(todo.title)
                     .font(.system(size: 16, weight: .semibold))
@@ -514,23 +521,6 @@ private struct PlanTodoRow: View {
                     .lineLimit(2)
 
                 Spacer(minLength: 8)
-
-                Button(action: onStartFocus) {
-                    Label(todo.status == .inProgress ? "Focus" : "Start", systemImage: "timer")
-                        .labelStyle(.iconOnly)
-                        .font(.system(size: 13, weight: .medium))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(LisdoTheme.ink3)
-                .accessibilityLabel(todo.status == .inProgress ? "Open Pomodoro" : "Start Pomodoro")
-
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 13, weight: .medium))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(LisdoTheme.ink3)
-                .accessibilityLabel("Delete todo")
             }
 
             HStack(spacing: 8) {
@@ -556,13 +546,15 @@ private struct PlanTodoRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .lisdoCard(padding: 13)
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture(perform: onOpen)
         .contextMenu {
             Button(action: onStartFocus) {
-                Label(todo.status == .inProgress ? "Open Pomodoro" : "Start Pomodoro", systemImage: "timer")
+                Label("Start focus", systemImage: "timer")
             }
 
-            Button(action: onToggleCompletion) {
-                Label(todo.status == .completed ? "Reopen Todo" : "Complete Todo", systemImage: todo.status == .completed ? "circle" : "checkmark.circle")
+            Button(action: onOpen) {
+                Label("Edit", systemImage: "pencil")
             }
 
             Button(role: .destructive, action: onDelete) {
@@ -638,6 +630,40 @@ private struct PlanDisplayTodo: Identifiable {
 
     var relevantDate: Date? {
         todo.scheduledDate ?? todo.dueDate
+    }
+}
+
+private struct PlanTodoDetailSelection: Identifiable, Hashable {
+    let todoID: UUID
+    var id: UUID { todoID }
+}
+
+private struct PlanMissingTodoDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                Image(systemName: "calendar.badge.exclamationmark")
+                    .font(.system(size: 30))
+                    .foregroundStyle(LisdoTheme.ink3)
+                Text("Todo unavailable")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(LisdoTheme.ink1)
+                Text("This todo may have been deleted or synced away on another device.")
+                    .font(.callout)
+                    .foregroundStyle(LisdoTheme.ink3)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(LisdoTheme.surface)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }
 

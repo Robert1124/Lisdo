@@ -46,7 +46,7 @@ private struct LisdoWidgetView: View {
         case .systemSmall:
             SmallFocusWidget(entry: entry)
         case .systemMedium:
-            MediumInboxWidget(entry: entry)
+            MediumTodayWidget(entry: entry)
         default:
             LargeTodayWidget(entry: entry)
         }
@@ -68,11 +68,8 @@ private struct SmallFocusWidget: View {
             case .error:
                 WidgetStateMessage(title: "Sync unavailable", message: "Open Lisdo to refresh iCloud state.")
                     .padding(.top, 10)
-            case .empty:
-                WidgetStateMessage(title: "No focus yet", message: "Approved todos for today will appear here.")
-                    .padding(.top, 10)
-            case .content:
-                if let focus = entry.focus {
+            case .empty, .content:
+                if let focus = entry.closestTodayTodo {
                     Text(focus.title)
                         .font(.system(size: 15, weight: .semibold, design: .default))
                         .foregroundStyle(LisdoColor.ink)
@@ -82,23 +79,15 @@ private struct SmallFocusWidget: View {
 
                     Spacer(minLength: 8)
 
-                    HStack(spacing: 6) {
-                        CategoryDot(categoryId: focus.categoryId)
-                        Text(focus.metadata)
-                            .font(.system(size: 11, weight: .regular))
-                            .foregroundStyle(LisdoColor.secondaryInk)
-                            .lineLimit(1)
-                    }
-
-                    if !focus.isInProgress {
-                        Button(intent: StartTodoIntent(todoID: focus.id)) {
-                            Label("Start", systemImage: "play.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(WidgetPillButtonStyle())
-                        .padding(.top, 8)
-                    }
+                    TodayTodoMetadata(task: focus, compact: true)
+                } else {
+                    WidgetStateMessage(title: "Nothing today", message: "No approved todos are due or scheduled today.")
+                        .padding(.top, 10)
+                    Spacer(minLength: 4)
+                    Text("Open Lisdo to capture a task.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(LisdoColor.secondaryInk)
+                        .lineLimit(1)
                 }
             }
         }
@@ -106,57 +95,40 @@ private struct SmallFocusWidget: View {
     }
 }
 
-private struct MediumInboxWidget: View {
+private struct MediumTodayWidget: View {
     let entry: LisdoWidgetEntry
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(headerText)
+                Text("Today")
                     .lisdoEyebrow()
-                    .lineLimit(1)
                 Spacer()
-                DraftSpark()
+                Text(entry.todayCountText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(LisdoColor.secondaryInk)
             }
 
             switch entry.state {
             case .loading:
-                WidgetStateMessage(title: "Loading", message: "Reading synced captures.")
+                WidgetStateMessage(title: "Loading", message: "Reading synced todos.")
             case .error:
                 WidgetStateMessage(title: "Sync unavailable", message: "Open Lisdo to refresh widgets.")
-            case .empty:
-                WidgetStateMessage(title: "Inbox is clear", message: "Drafts and pending captures appear here.")
-            case .content:
-                VStack(spacing: 7) {
-                    ForEach(entry.inboxItems) { item in
-                        InboxRow(item: item)
+            case .empty, .content:
+                if entry.todayItems.isEmpty {
+                    WidgetStateMessage(title: "Nothing due today", message: "Today's approved todos will appear here.")
+                    Spacer(minLength: 0)
+                } else {
+                    VStack(spacing: 7) {
+                        ForEach(entry.todayItems.prefix(4)) { task in
+                            TodayTodoRow(task: task)
+                        }
                     }
-
-                    if entry.inboxItems.isEmpty {
-                        WidgetStateMessage(title: "No drafts", message: "Pending captures and review drafts will appear here.")
-                    }
+                    Spacer(minLength: 0)
                 }
             }
         }
         .padding(14)
-    }
-
-    private var headerText: String {
-        let parts = [
-            countText(entry.draftCount, singular: "draft", plural: "drafts"),
-            countText(entry.pendingCaptureCount, singular: "pending", plural: "pending"),
-            countText(entry.failedCaptureCount, singular: "failed", plural: "failed")
-        ].compactMap { $0 }
-
-        return parts.isEmpty ? "Inbox" : "Inbox · \(parts.joined(separator: " · "))"
-    }
-
-    private func countText(_ count: Int, singular: String, plural: String) -> String? {
-        guard count > 0 else {
-            return nil
-        }
-
-        return "\(count) \(count == 1 ? singular : plural)"
     }
 }
 
@@ -166,11 +138,11 @@ private struct LargeTodayWidget: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Today")
+                Text("Today · \(entry.shortDateText)")
                     .lisdoEyebrow()
                 Spacer()
-                Text(entry.todayTodoCount == 1 ? "1 left" : "\(entry.todayTodoCount) left")
-                    .font(.system(size: 10))
+                Text(entry.todayCountText)
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(LisdoColor.secondaryInk)
             }
 
@@ -179,91 +151,42 @@ private struct LargeTodayWidget: View {
                 WidgetStateMessage(title: "Loading Lisdo", message: "Reading synced task state.")
             case .error(let message):
                 WidgetStateMessage(title: "Sync unavailable", message: message)
-            case .empty:
-                WidgetStateMessage(title: "No approved todos", message: "Review a draft in Lisdo to create today's tasks.")
-            case .content:
-                ActiveTaskCard(task: entry.activeTask)
+            case .empty, .content:
+                if let focus = entry.closestTodayTodo {
+                    TodayFocusBlock(task: focus)
 
-                VStack(spacing: 8) {
-                    ForEach(entry.todayItems) { task in
-                        TodayRow(task: task)
+                    VStack(spacing: 8) {
+                        ForEach(entry.todayItems.dropFirst().prefix(5)) { task in
+                            TodayTodoRow(task: task)
+                        }
                     }
-
-                    if entry.todayItems.isEmpty {
-                        WidgetStateMessage(title: "No tasks today", message: "Saved todos without a date stay in the fallback list.")
-                    }
+                } else {
+                    WidgetStateMessage(title: "No todos today", message: "Approved todos due or scheduled today will appear here.")
+                        .padding(.top, 6)
                 }
 
-                Spacer(minLength: 2)
-
-                WidgetSummaryFooter(entry: entry)
+                Spacer(minLength: 0)
             }
         }
         .padding(16)
     }
 }
 
-private struct ActiveTaskCard: View {
-    let task: WidgetActiveTask?
+private struct TodayFocusBlock: View {
+    let task: WidgetTask
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(task == nil ? "Now" : "Active task")
-                .lisdoEyebrow(size: 9)
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Now")
+                .lisdoEyebrow(size: 8)
 
-            if let task {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    CategoryDot(categoryId: task.categoryId)
-                    Text(task.categoryName)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(LisdoColor.secondaryInk)
-                }
+            Text(task.title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(LisdoColor.ink)
+                .lineLimit(2)
+                .lineSpacing(1)
 
-                Text(task.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(LisdoColor.ink)
-                    .lineLimit(2)
-
-                ProgressView(value: task.progress)
-                    .tint(LisdoColor.ink)
-                    .scaleEffect(x: 1, y: 0.65, anchor: .center)
-
-                Text("\(task.progressLabel) · \(task.currentStep)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(LisdoColor.secondaryInk)
-                    .lineLimit(1)
-
-                if let nextStep = task.nextStep {
-                    Text("Next: \(nextStep)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(LisdoColor.secondaryInk)
-                        .lineLimit(1)
-                }
-
-                HStack(spacing: 8) {
-                    if let blockID = task.currentStepBlockId {
-                        Button(intent: ToggleTodoBlockIntent(todoID: task.todoId, blockID: blockID)) {
-                            Label("Step", systemImage: "checkmark.circle")
-                                .font(.system(size: 11, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(WidgetPillButtonStyle())
-                    }
-
-                    Button(intent: CompleteTodoIntent(todoID: task.todoId)) {
-                        Label("Done", systemImage: "checkmark")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(WidgetPillButtonStyle(filled: true))
-                }
-                .padding(.top, 2)
-            } else {
-                Text("Start an approved todo to show step progress here.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(LisdoColor.secondaryInk)
-                    .lineLimit(2)
-            }
+            TodayTodoMetadata(task: task)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -276,80 +199,88 @@ private struct ActiveTaskCard: View {
     }
 }
 
-private struct WidgetSummaryFooter: View {
-    let entry: LisdoWidgetEntry
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Label("Drafts \(entry.draftCount)", systemImage: "doc.text.viewfinder")
-            Label("Pending \(entry.pendingCaptureCount)", systemImage: "tray")
-            if entry.failedCaptureCount > 0 {
-                Label("Failed \(entry.failedCaptureCount)", systemImage: "exclamationmark.triangle")
-            }
-            Spacer(minLength: 4)
-            Text("Draft-first")
-                .font(.system(size: 10, weight: .medium))
-        }
-        .font(.system(size: 11))
-        .foregroundStyle(LisdoColor.secondaryInk)
-        .padding(.horizontal, 10)
-        .frame(height: 30)
-        .background(LisdoColor.surface2)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-private struct InboxRow: View {
-    let item: WidgetInboxItem
-
-    var body: some View {
-        HStack(spacing: 8) {
-            StatusCircle(isDraft: item.kind == .draft, isFailed: item.kind == .failed)
-            CategoryDot(categoryId: item.categoryId)
-            Text(item.title)
-                .font(.system(size: 12))
-                .foregroundStyle(LisdoColor.ink)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            Text(item.metadata)
-                .font(.system(size: 10))
-                .foregroundStyle(LisdoColor.secondaryInk)
-                .lineLimit(1)
-        }
-    }
-}
-
-private struct TodayRow: View {
+private struct TodayTodoRow: View {
     let task: WidgetTask
 
     var body: some View {
         HStack(spacing: 8) {
-            Button(intent: CompleteTodoIntent(todoID: task.id)) {
-                StatusCircle(isDraft: false, isActive: task.isInProgress)
-            }
-            .buttonStyle(.plain)
-
+            StatusCircle(isDraft: false, isActive: task.isInProgress)
             CategoryDot(categoryId: task.categoryId)
+
             Text(task.title)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(LisdoColor.ink)
                 .lineLimit(1)
+
             Spacer(minLength: 4)
+
             Text(task.metadata)
                 .font(.system(size: 10))
                 .foregroundStyle(LisdoColor.secondaryInk)
                 .lineLimit(1)
+        }
+    }
+}
 
-            if !task.isInProgress {
-                Button(intent: StartTodoIntent(todoID: task.id)) {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(LisdoColor.ink)
+private struct TodayTodoMetadata: View {
+    let task: WidgetTask
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            CategoryDot(categoryId: task.categoryId)
+
+            if compact {
+                Text(task.compactMetadata)
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(LisdoColor.secondaryInk)
+                    .lineLimit(1)
+            } else {
+                Text(task.categoryName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(LisdoColor.secondaryInk)
+                    .lineLimit(1)
+
+                Text("·")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(LisdoColor.ink4)
+
+                Text(task.metadata)
+                    .font(.system(size: 11))
+                    .foregroundStyle(LisdoColor.secondaryInk)
+                    .lineLimit(1)
             }
         }
+    }
+}
+
+private extension LisdoWidgetEntry {
+    var closestTodayTodo: WidgetTask? {
+        todayItems.first
+    }
+
+    var todayCountText: String {
+        todayTodoCount == 1 ? "1 left" : "\(todayTodoCount) left"
+    }
+
+    var shortDateText: String {
+        Self.shortDateFormatter.string(from: date)
+    }
+
+    private static let shortDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEE MMM d")
+        return formatter
+    }()
+}
+
+private extension WidgetTask {
+    var compactMetadata: String {
+        guard metadata != "Saved" else {
+            return categoryName
+        }
+
+        return "\(categoryName) · \(metadata)"
     }
 }
 
@@ -428,36 +359,6 @@ private struct CategoryDot: View {
         default:
             LisdoColor.ink
         }
-    }
-}
-
-private struct DraftSpark: View {
-    var body: some View {
-        Image(systemName: "sparkle")
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(LisdoColor.ink)
-            .frame(width: 18, height: 18)
-            .background(LisdoColor.ink.opacity(0.05))
-            .clipShape(Circle())
-            .accessibilityLabel("Draft")
-    }
-}
-
-private struct WidgetPillButtonStyle: ButtonStyle {
-    var filled = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(filled ? .white : LisdoColor.ink)
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(filled ? LisdoColor.ink : LisdoColor.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(filled ? LisdoColor.ink : LisdoColor.divider, lineWidth: 1)
-            }
-            .opacity(configuration.isPressed ? 0.72 : 1)
     }
 }
 

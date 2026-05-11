@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Updates - Lisdo</title>
+    <meta
+      name="description"
+      content="Lisdo app update notes, GitHub Releases, and Mac and iOS download links."
+    >
+    <link rel="canonical" href="https://lisdo.robertw.me/updates.html">
+    <link rel="icon" href="assets/lisdo-logo.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header doc-header">
+      <a class="brand" href="/" aria-label="Lisdo home">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/lisdo-logo.png" alt="">
+        </span>
+        <span>Lisdo</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="/#workflow" data-i18n="nav.workflow">Workflow</a>
+        <a href="/#surfaces" data-i18n="nav.surfaces">App surfaces</a>
+        <a href="/privacy.html" data-i18n="nav.privacy">Privacy</a>
+        <a href="/support.html" data-i18n="nav.support">Support</a>
+        <a href="/#faq" data-i18n="nav.faq">FAQ</a>
+      </nav>
+
+      <div class="header-actions">
+        <div class="language-toggle" aria-label="Language">
+          <button type="button" data-lang-option="zh" aria-pressed="false">中</button>
+          <button type="button" data-lang-option="en" aria-pressed="true">EN</button>
+        </div>
+        <a
+          class="icon-button"
+          href="https://github.com/Robert1124/Lisdo"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub repository"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 .5A11.5 11.5 0 0 0 8.4 22.9c.58.1.8-.25.8-.56v-2c-3.25.7-3.93-1.39-3.93-1.39-.53-1.35-1.3-1.72-1.3-1.72-1.06-.72.08-.7.08-.7 1.17.08 1.79 1.2 1.79 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.74-1.56-2.6-.3-5.33-1.3-5.33-5.79 0-1.28.46-2.33 1.2-3.15-.12-.3-.52-1.5.12-3.1 0 0 .98-.32 3.2 1.2A11.1 11.1 0 0 1 12 5.9c.99 0 1.98.13 2.91.4 2.22-1.52 3.2-1.2 3.2-1.2.64 1.6.24 2.8.12 3.1.75.82 1.2 1.87 1.2 3.15 0 4.5-2.74 5.49-5.35 5.78.42.37.8 1.08.8 2.18v3.03c0 .31.2.67.8.56A11.5 11.5 0 0 0 12 .5Z"></path>
+          </svg>
+        </a>
+      </div>
+    </header>
+
+    <main class="doc-main">
+      <section class="doc-hero section-pad">
+        <p class="doc-kicker" data-i18n="doc.kicker">Lisdo documentation</p>
+        <h1 data-i18n="updates.title">App And Update Notes</h1>
+        <p data-i18n="updates.intro">View the latest GitHub Releases and download Mac or iOS builds when public artifacts are available.</p>
+      </section>
+
+      <section class="doc-content">
+        <article class="doc-card">
+          <h2 data-i18n="updates.releasesTitle">GitHub Releases</h2>
+          <div class="release-list" data-release-list>
+            <p class="release-empty" data-i18n="updates.releasesLoading">Loading GitHub Releases...</p>
+          </div>
+        </article>
+
+        <article class="doc-card">
+          <h2 data-i18n="updates.downloadTitle">Downloads</h2>
+          <p data-i18n="updates.downloadBody">
+            Mac public builds are published through GitHub Releases. iOS distribution will use
+            TestFlight when it is ready.
+          </p>
+          <div class="doc-actions">
+            <a class="pill-button dark" href="https://github.com/Robert1124/Lisdo/releases" target="_blank" rel="noopener noreferrer" data-i18n="updates.macDownload">Mac download</a>
+            <a class="pill-button light" href="https://github.com/Robert1124/Lisdo" target="_blank" rel="noopener noreferrer" data-i18n="updates.iosDownload">iOS download</a>
+          </div>
+        </article>
+
+        <article class="doc-card">
+          <h2 data-i18n="updates.dataTitle">Data Handling Changes</h2>
+          <p><span data-i18n="updates.dataPrefix">Any update that changes sync behavior, provider requests, raw media handling, or secret storage should update the </span><a href="/privacy.html" data-i18n="updates.dataPrivacy">Privacy Policy</a><span data-i18n="updates.dataAnd"> and </span><a href="/security.html" data-i18n="updates.dataSecurity">Security And Data Handling</a><span data-i18n="updates.dataSuffix"> pages before release.</span></p>
+        </article>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/lisdo-logo.png" alt="">
+        </span>
+        <span>Lisdo</span>
+      </div>
+      <p data-i18n="footer.copy">Native AI task inbox for iPhone and Mac. Draft-first by design.</p>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <a href="https://github.com/Robert1124/Lisdo" target="_blank" rel="noopener noreferrer" data-i18n="footer.github">GitHub repo</a>
+        <a href="https://github.com/sponsors/Robert1124" target="_blank" rel="noopener noreferrer" data-i18n="footer.sponsor">Sponsor</a>
+      </nav>
+    </footer>
+    <script src="script.js"></script>
+  </body>
+</html>

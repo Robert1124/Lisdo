@@ -9,7 +9,12 @@ import WidgetKit
 
 enum LisdoMacNotifications {
     static let openCapture = Notification.Name("LisdoMacOpenCapture")
+    static let selectScreenArea = Notification.Name("LisdoMacSelectScreenArea")
+    static let openFromIPhone = Notification.Name("LisdoMacOpenFromIPhone")
+    static let openTodo = Notification.Name("LisdoMacOpenTodo")
+    static let hotKeysChanged = Notification.Name("LisdoMacHotKeysChanged")
     static let hotKeyStatusDefaultsKey = "lisdo.mac.global-hotkey.status"
+    static let todoIdUserInfoKey = "todoId"
 }
 
 private enum LisdoNotificationFeedback {
@@ -78,13 +83,50 @@ struct LisdoMacProcessingOutcome: Equatable {
 @MainActor
 enum LisdoMacMVP2Processing {
     static let preferenceStore = LisdoLocalProviderPreferenceStore()
+    private static var lastResolvedProviderMode: ProviderMode = .openAICompatibleBYOK
 
     static var providerMode: ProviderMode {
-        preferenceStore.readProviderMode(default: .openAICompatibleBYOK)
+        lastResolvedProviderMode
     }
 
     static var providerModeLabel: String {
         DraftProviderFactory.metadata(for: providerMode).displayName
+    }
+
+    static func syncedSettings(modelContext: ModelContext) throws -> LisdoSyncedSettings {
+        let settings = try LisdoSyncedSettingsStore(context: modelContext).fetchOrCreateSettings()
+        lastResolvedProviderMode = settings.selectedProviderMode
+        return settings
+    }
+
+    static func providerMode(modelContext: ModelContext) -> ProviderMode {
+        do {
+            return try syncedSettings(modelContext: modelContext).selectedProviderMode
+        } catch {
+            return lastResolvedProviderMode
+        }
+    }
+
+    static func providerModeLabel(modelContext: ModelContext) -> String {
+        DraftProviderFactory.metadata(for: providerMode(modelContext: modelContext)).displayName
+    }
+
+    static func imageProcessingMode(modelContext: ModelContext) -> LisdoImageProcessingMode {
+        do {
+            let rawValue = try syncedSettings(modelContext: modelContext).imageProcessingModeRawValue
+            return LisdoImageProcessingMode(rawValue: rawValue) ?? .visionOCR
+        } catch {
+            return .visionOCR
+        }
+    }
+
+    static func voiceProcessingMode(modelContext: ModelContext) -> LisdoVoiceProcessingMode {
+        do {
+            let rawValue = try syncedSettings(modelContext: modelContext).voiceProcessingModeRawValue
+            return LisdoVoiceProcessingMode(rawValue: rawValue) ?? .speechTranscript
+        } catch {
+            return .speechTranscript
+        }
     }
 
     static func macOnlyCLISettings() -> MacOnlyCLIProviderSettings? {
@@ -128,20 +170,22 @@ enum LisdoMacMVP2Processing {
             createdDevice: .mac
         )
 
-        if (imageAttachment != nil || audioAttachment != nil), !supportsDirectAttachmentProvider(providerMode) {
+        let selectedProviderMode = providerMode(modelContext: modelContext)
+
+        if (imageAttachment != nil || audioAttachment != nil), !supportsDirectAttachmentProvider(selectedProviderMode) {
             return saveFailedCaptureWithoutProvider(
                 from: payload,
-                providerMode: providerMode,
-                message: "\(DraftProviderFactory.metadata(for: providerMode).displayName) does not support direct image/audio attachments in Lisdo yet. Switch this capture setting back to OCR/transcript or choose an OpenAI-compatible provider.",
+                providerMode: selectedProviderMode,
+                message: "\(DraftProviderFactory.metadata(for: selectedProviderMode).displayName) does not support direct image attachments in Lisdo yet. Switch image capture back to OCR or choose an OpenAI-compatible provider.",
                 modelContext: modelContext
             )
         }
 
-        guard let providerPlan = makeSelectedProviderPlan(mode: providerMode) else {
+        guard let providerPlan = makeSelectedProviderPlan(mode: selectedProviderMode) else {
             return saveFailedCaptureWithoutProvider(
                 from: payload,
-                providerMode: providerMode,
-                message: noProviderMessage(startingWith: providerMode),
+                providerMode: selectedProviderMode,
+                message: noProviderMessage(startingWith: selectedProviderMode),
                 modelContext: modelContext
             )
         }
@@ -149,7 +193,7 @@ enum LisdoMacMVP2Processing {
         return await createDraftFirstCapture(
             from: payload,
             providerPlan: providerPlan,
-            providerMode: providerMode,
+            providerMode: selectedProviderMode,
             imageAttachment: imageAttachment,
             audioAttachment: audioAttachment,
             selectedCategoryId: selectedCategoryId,
@@ -168,7 +212,12 @@ enum LisdoMacMVP2Processing {
             return .skipped("Skipped a capture that is not pending or retry-ready.")
         }
 
-        let startingMode = providerMode
+        guard isMacProcessingQueueCapture(capture) else {
+            return .skipped("Skipped a capture that is not assigned to Mac-only CLI processing.")
+        }
+
+        let startingMode = capture.preferredProviderMode
+        let attachmentContext = pendingAttachmentContext(for: capture, modelContext: modelContext)
         guard let providerPlan = makeSelectedProviderPlan(mode: startingMode) else {
             failCapture(capture, message: noProviderMessage(startingWith: startingMode))
             try? modelContext.save()
@@ -186,15 +235,26 @@ enum LisdoMacMVP2Processing {
             try modelContext.save()
             publishCaptureChange(reason: "Mac queue item processing")
 
-            let sourceText = try capture.normalizedProcessableText()
-            let draft = try await providerPlan.provider.generateDraft(
+            let sourceText = try queueSourceText(
+                for: capture,
+                providerMode: startingMode,
+                attachmentContext: attachmentContext
+            )
+            let imageAttachment = supportsDirectAttachmentProvider(startingMode) ? attachmentContext.imageAttachment : nil
+            let additionalImageAttachments = supportsDirectAttachmentProvider(startingMode) ? attachmentContext.additionalImageAttachments : []
+            let draft = try await TaskDraftProviderOutputRetry.generateDraft(
+                provider: providerPlan.provider,
                 input: TaskDraftInput(
                     captureItemId: capture.id,
                     sourceText: sourceText,
                     userNote: capture.userNote,
                     preferredSchemaPreset: categories.category(id: selectedCategoryId)?.schemaPreset,
                     captureCreatedAt: capture.createdAt,
-                    timeZoneIdentifier: TimeZone.current.identifier
+                    timeZoneIdentifier: TimeZone.current.identifier,
+                    imageAttachment: imageAttachment,
+                    audioAttachment: nil,
+                    additionalImageAttachments: additionalImageAttachments,
+                    additionalAudioAttachments: []
                 ),
                 categories: categories,
                 options: TaskDraftProviderOptions(model: providerPlan.modelName)
@@ -203,13 +263,15 @@ enum LisdoMacMVP2Processing {
             try markProcessingSucceeded(capture, with: draft)
             modelContext.insert(draft)
             try modelContext.save()
+            let cleanupWarning = deletePendingAttachments(for: capture, modelContext: modelContext)
             publishCaptureChange(
                 reason: "Mac queue draft created",
                 notificationTitle: "Draft ready",
-                notificationBody: successMessage(for: providerPlan),
+                notificationBody: cleanupWarning ?? successMessage(for: providerPlan),
                 identifier: capture.id.uuidString
             )
-            return .draftCreated("Draft created from Mac queue. \(successMessage(for: providerPlan))")
+            let cleanupMessage = cleanupWarning.map { " \($0)" } ?? ""
+            return .draftCreated("Draft created from Mac queue. \(successMessage(for: providerPlan))\(cleanupMessage)")
         } catch let error as CLIProviderError {
             if capture.status == .processing {
                 try? capture.markCLIProcessingFailed(error)
@@ -217,23 +279,27 @@ enum LisdoMacMVP2Processing {
                 failCapture(capture, message: error.userReadableMessage)
             }
             try? modelContext.save()
+            let cleanupWarning = deletePendingAttachments(for: capture, modelContext: modelContext)
             publishCaptureChange(
                 reason: "Mac queue item failed",
                 notificationTitle: "Capture processing failed",
-                notificationBody: error.userReadableMessage,
+                notificationBody: cleanupWarning ?? error.userReadableMessage,
                 identifier: capture.id.uuidString
             )
-            return .failedSaved(error.userReadableMessage)
+            let cleanupMessage = cleanupWarning.map { " \($0)" } ?? ""
+            return .failedSaved("\(error.userReadableMessage)\(cleanupMessage)")
         } catch {
             failCapture(capture, message: error.localizedDescription)
             try? modelContext.save()
+            let cleanupWarning = deletePendingAttachments(for: capture, modelContext: modelContext)
             publishCaptureChange(
                 reason: "Mac queue item failed",
                 notificationTitle: "Capture processing failed",
-                notificationBody: error.localizedDescription,
+                notificationBody: cleanupWarning ?? error.localizedDescription,
                 identifier: capture.id.uuidString
             )
-            return .failedSaved("Processing failed: \(error.localizedDescription)")
+            let cleanupMessage = cleanupWarning.map { " \($0)" } ?? ""
+            return .failedSaved("Processing failed: \(error.localizedDescription)\(cleanupMessage)")
         }
     }
 
@@ -245,6 +311,7 @@ enum LisdoMacMVP2Processing {
         onItemComplete: ((LisdoMacProcessingOutcome) -> Void)? = nil
     ) async -> LisdoMacProcessingOutcome {
         let queue = CaptureBatchSelector.processablePendingCaptures(from: captures)
+            .filter(isMacProcessingQueueCapture)
         guard !queue.isEmpty else {
             return .skipped("No pending or retry-ready captures.")
         }
@@ -278,6 +345,10 @@ enum LisdoMacMVP2Processing {
     }
 
     static func retryCapture(_ capture: CaptureItem, modelContext: ModelContext) -> LisdoMacProcessingOutcome {
+        guard isMacProcessingQueueCapture(capture) else {
+            return .skipped("Only Mac-only CLI captures can be retried from this Mac queue.")
+        }
+
         do {
             _ = try CaptureBatchActions.queueFailedCapturesForRetry([capture])
             try modelContext.save()
@@ -295,11 +366,14 @@ enum LisdoMacMVP2Processing {
 
     static func pendingQueue(from captures: [CaptureItem]) -> [CaptureItem] {
         captures.filter { capture in
-            capture.createdDevice == .iPhone
-            || capture.status == .pendingProcessing
-            || capture.status == .processing
-            || capture.status == .failed
-            || capture.status == .retryPending
+            isMacProcessingQueueCapture(capture)
+                && (
+                    capture.status == .pendingProcessing
+                        || capture.status == .processing
+                        || capture.status == .failed
+                        || capture.status == .retryPending
+                        || capture.status == .processedDraft
+                )
         }
     }
 
@@ -320,12 +394,14 @@ enum LisdoMacMVP2Processing {
             return .failedSaved("Original source text is unavailable, so Lisdo cannot rerun this draft.")
         }
 
-        guard let providerPlan = makeSelectedProviderPlan(mode: providerMode) else {
-            return .failedSaved(noProviderMessage(startingWith: providerMode))
+        let selectedProviderMode = providerMode(modelContext: modelContext)
+        guard let providerPlan = makeSelectedProviderPlan(mode: selectedProviderMode) else {
+            return .failedSaved(noProviderMessage(startingWith: selectedProviderMode))
         }
 
         do {
-            let revised = try await providerPlan.provider.generateDraft(
+            let revised = try await TaskDraftProviderOutputRetry.generateDraft(
+                provider: providerPlan.provider,
                 input: TaskDraftInput(
                     captureItemId: draft.captureItemId,
                     sourceText: sourceText,
@@ -402,7 +478,8 @@ enum LisdoMacMVP2Processing {
             try modelContext.save()
             publishCaptureChange(reason: "Mac direct capture processing")
 
-            let draft = try await providerPlan.provider.generateDraft(
+            let draft = try await TaskDraftProviderOutputRetry.generateDraft(
+                provider: providerPlan.provider,
                 input: TaskDraftInput(
                     captureItemId: capture.id,
                     sourceText: try capture.normalizedProcessableText(),
@@ -508,6 +585,18 @@ enum LisdoMacMVP2Processing {
         var modelName: String
     }
 
+    private struct PendingAttachmentContext {
+        var imageAttachment: TaskDraftImageAttachment?
+        var additionalImageAttachments: [TaskDraftImageAttachment] = []
+        var contextText: String?
+
+        var hasAttachments: Bool {
+            imageAttachment != nil
+                || !additionalImageAttachments.isEmpty
+                || contextText != nil
+        }
+    }
+
     private static func makeSelectedProviderPlan(mode: ProviderMode) -> ProviderPlan? {
         let factory = DraftProviderFactory(
             preferenceStore: preferenceStore,
@@ -538,16 +627,104 @@ enum LisdoMacMVP2Processing {
 
     private static func supportsDirectAttachmentProvider(_ mode: ProviderMode) -> Bool {
         switch mode {
-        case .openAICompatibleBYOK, .minimax, .openRouter, .ollama, .lmStudio, .localModel:
+        case .openAICompatibleBYOK, .openRouter, .ollama, .lmStudio, .localModel, .macOnlyCLI:
             return true
-        case .anthropic, .gemini, .macOnlyCLI:
+        case .minimax, .anthropic, .gemini:
             return false
         }
     }
 
     private static func isQueueProcessable(_ capture: CaptureItem) -> Bool {
-        CaptureBatchSelector.processablePendingCaptures(from: [capture]).contains { $0.id == capture.id }
-            || (capture.status == .processing && capture.processingLockCreatedAt == nil)
+        isMacProcessingQueueCapture(capture)
+            && (
+                CaptureBatchSelector.processablePendingCaptures(from: [capture]).contains { $0.id == capture.id }
+                    || (capture.status == .processing && capture.processingLockCreatedAt == nil)
+            )
+    }
+
+    private static func isMacProcessingQueueCapture(_ capture: CaptureItem) -> Bool {
+        capture.preferredProviderMode == .macOnlyCLI
+    }
+
+    private static func pendingAttachmentContext(
+        for capture: CaptureItem,
+        modelContext: ModelContext
+    ) -> PendingAttachmentContext {
+        let attachments = (try? LisdoPendingAttachmentStore(context: modelContext).fetchAttachments(forCaptureItemId: capture.id)) ?? []
+        guard !attachments.isEmpty else {
+            return PendingAttachmentContext()
+        }
+
+        let imageAttachments = attachments.filter { $0.kind == .image }
+        let convertedImageAttachments = imageAttachments.map {
+            TaskDraftImageAttachment(
+                data: $0.data,
+                mimeType: $0.mimeOrFormat,
+                filename: $0.filename
+            )
+        }
+
+        let attachmentLines = attachments.enumerated().map { index, attachment in
+            let filename = attachment.filename?.lisdoTrimmed.nilIfEmpty ?? "unnamed"
+            return "\(index + 1). \(attachment.kind.rawValue) attachment: \(filename), format: \(attachment.mimeOrFormat), \(attachment.data.count) bytes"
+        }
+        let contextText = """
+        Pending raw media attachments were synced explicitly for Mac processing:
+        \(attachmentLines.joined(separator: "\n"))
+        Image attachments may be sent to direct-image providers. Audio attachments are no longer sent to providers; voice processing requires transcript text. Use this metadata plus any source text, transcript, or user note as context and keep the output as strict draft JSON for user review.
+        """
+
+        return PendingAttachmentContext(
+            imageAttachment: convertedImageAttachments.first,
+            additionalImageAttachments: Array(convertedImageAttachments.dropFirst()),
+            contextText: contextText
+        )
+    }
+
+    private static func queueSourceText(
+        for capture: CaptureItem,
+        providerMode: ProviderMode,
+        attachmentContext: PendingAttachmentContext
+    ) throws -> String {
+        let baseText = (try? capture.normalizedProcessableText())?.lisdoTrimmed.nilIfEmpty
+        let attachmentText = attachmentContext.contextText?.lisdoTrimmed.nilIfEmpty
+
+        if supportsDirectAttachmentProvider(providerMode) {
+            return [
+                baseText,
+                attachmentText.map { "Attachment context:\n\($0)" }
+            ]
+            .compactMap { $0 }
+            .joined(separator: "\n\n")
+            .lisdoTrimmed
+            .nilIfEmpty ?? "Raw media attachment included for direct provider analysis."
+        }
+
+        guard let sourceText = [
+            baseText,
+            attachmentText.map { "Attachment context for this text-only provider:\n\($0)" }
+        ]
+        .compactMap({ $0 })
+        .joined(separator: "\n\n")
+        .lisdoTrimmed
+        .nilIfEmpty
+        else {
+            throw CaptureContentNormalizationError.emptyContent
+        }
+
+        return sourceText
+    }
+
+    private static func deletePendingAttachments(
+        for capture: CaptureItem,
+        modelContext: ModelContext
+    ) -> String? {
+        do {
+            try LisdoPendingAttachmentStore(context: modelContext).deleteAttachments(forCaptureItemId: capture.id)
+            return nil
+        } catch {
+            return "Raw media cleanup failed; synced attachments may remain until retry: \(error.localizedDescription)"
+        }
     }
 
     private static func leaseForProviderProcessing(_ capture: CaptureItem) throws {

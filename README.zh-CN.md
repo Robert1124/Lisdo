@@ -93,6 +93,10 @@ python3 -m http.server 4173 --bind 127.0.0.1
 - `LisdoCore` 负责共享模型、草稿解析、provider contracts、fallback 逻辑、draft-to-todo conversion 和可测试状态转换。
 - 平台 targets 负责 SwiftUI 界面、Vision OCR adapters、Keychain 实现、model container wiring 和 extension integration。
 
+## 赞助
+
+Lisdo 是开源项目。如果这个项目对你有帮助，可以通过 [GitHub Sponsors](https://github.com/sponsors/Robert1124) 支持后续开发。
+
 ## License
 
 Lisdo 使用 MIT License 开源。详见 [LICENSE](LICENSE)。

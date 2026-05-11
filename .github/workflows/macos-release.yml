@@ -1,0 +1,304 @@
+name: macOS Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  macos-release:
+    name: Build, sign, notarize, and publish macOS release
+    runs-on: macos-15-intel
+    env:
+      RELEASE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+      DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+      DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      DEVELOPER_ID_PROVISIONING_PROFILE_BASE64: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILE_BASE64 }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+      NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.NOTARY_PRIVATE_KEY_BASE64 }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate release inputs and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_VERSION" =~ ^v[0-9]+(\.[0-9]+){1,2}$ ]]; then
+            echo "Release version must look like v1.0.0; got '$RELEASE_VERSION'." >&2
+            exit 64
+          fi
+
+          missing=()
+          for name in \
+            APPLE_TEAM_ID \
+            DEVELOPER_ID_APPLICATION \
+            DEVELOPER_ID_CERTIFICATE_BASE64 \
+            DEVELOPER_ID_CERTIFICATE_PASSWORD \
+            DEVELOPER_ID_PROVISIONING_PROFILE_BASE64 \
+            NOTARY_KEY_ID \
+            NOTARY_ISSUER_ID \
+            NOTARY_PRIVATE_KEY_BASE64
+          do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            printf 'Missing required release secret(s): %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Import Developer ID certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/lisdo-release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          base64 --decode <<< "$DEVELOPER_ID_CERTIFICATE_BASE64" > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN_PATH" -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Install Developer ID provisioning profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROFILE_PATH="$RUNNER_TEMP/LisdoMac.provisionprofile"
+          base64 --decode <<< "$DEVELOPER_ID_PROVISIONING_PROFILE_BASE64" > "$PROFILE_PATH"
+          PROFILE_UUID="$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.provisionprofile"
+          echo "Installed Developer ID provisioning profile $PROFILE_UUID."
+
+      - name: Prepare notarization key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/notary"
+          base64 --decode <<< "$NOTARY_PRIVATE_KEY_BASE64" > "$RUNNER_TEMP/notary/AuthKey_${NOTARY_KEY_ID}.p8"
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Run core tests
+        run: swift test --package-path Packages/LisdoCore
+
+      - name: Build macOS archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="${RELEASE_VERSION#v}"
+          ARCHIVE_PATH="$PWD/dist/archive/Lisdo-${APP_VERSION}.xcarchive"
+          rm -rf "$PWD/dist"
+          mkdir -p "$PWD/dist/archive"
+
+          xcodebuild \
+            -project Lisdo.xcodeproj \
+            -scheme LisdoMac \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            -allowProvisioningUpdates \
+            archive \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" \
+            MARKETING_VERSION="$APP_VERSION" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp --options runtime"
+
+          ARCHIVED_APP="$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name "*.app" -print -quit)"
+          if [[ -z "$ARCHIVED_APP" ]]; then
+            echo "No archived app bundle found under $ARCHIVE_PATH/Products/Applications." >&2
+            exit 1
+          fi
+          /usr/bin/ditto "$ARCHIVED_APP" "$PWD/dist/Lisdo.app"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PWD/dist/Lisdo.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PWD/dist/Lisdo.app/Contents/Info.plist"
+
+      - name: Validate Developer ID app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="dist/Lisdo.app"
+          codesign --verify --strict --deep "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | tee "$RUNNER_TEMP/lisdo-codesign.txt"
+          grep -q 'Authority=Developer ID Application:' "$RUNNER_TEMP/lisdo-codesign.txt"
+          grep -q 'Runtime Version=' "$RUNNER_TEMP/lisdo-codesign.txt"
+          codesign -d --entitlements :- "$APP" > "$RUNNER_TEMP/lisdo-entitlements.plist"
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$RUNNER_TEMP/lisdo-entitlements.plist" | grep -q true
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.network.client' "$RUNNER_TEMP/lisdo-entitlements.plist" | grep -q true
+
+      - name: Submit app bundle for notarization
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="${RELEASE_VERSION#v}"
+          APP_NOTARY_ZIP="$RUNNER_TEMP/Lisdo-${APP_VERSION}-app-notary.zip"
+          APP_NOTARY_OUTPUT="$RUNNER_TEMP/app-notary-submit.json"
+          rm -f "$APP_NOTARY_ZIP"
+          /usr/bin/ditto -c -k --keepParent --sequesterRsrc --zlibCompressionLevel 9 "dist/Lisdo.app" "$APP_NOTARY_ZIP"
+
+          set +e
+          xcrun notarytool submit "$APP_NOTARY_ZIP" \
+            --key "$RUNNER_TEMP/notary/AuthKey_${NOTARY_KEY_ID}.p8" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait \
+            --output-format json | tee "$APP_NOTARY_OUTPUT"
+          submit_status="${PIPESTATUS[0]}"
+          set -e
+
+          submission_id="$(ruby -rjson -e 'data = JSON.parse(File.read(ARGV[0])); print(data["id"].to_s)' "$APP_NOTARY_OUTPUT")"
+          notary_status="$(ruby -rjson -e 'data = JSON.parse(File.read(ARGV[0])); print(data["status"].to_s)' "$APP_NOTARY_OUTPUT")"
+          if [[ "$submit_status" != "0" || "$notary_status" != "Accepted" ]]; then
+            echo "App notarization failed with status: ${notary_status:-unknown}" >&2
+            if [[ -n "$submission_id" ]]; then
+              xcrun notarytool log "$submission_id" \
+                --key "$RUNNER_TEMP/notary/AuthKey_${NOTARY_KEY_ID}.p8" \
+                --key-id "$NOTARY_KEY_ID" \
+                --issuer "$NOTARY_ISSUER_ID" \
+                --team-id "$APPLE_TEAM_ID" || true
+            fi
+            exit 1
+          fi
+
+      - name: Staple notarized app
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..6}; do
+            if xcrun stapler staple "dist/Lisdo.app"; then
+              break
+            fi
+            if [[ "$attempt" == "6" ]]; then
+              echo "Failed to staple app after $attempt attempts." >&2
+              exit 1
+            fi
+            echo "App notarization ticket is not available yet; retrying in 20 seconds."
+            sleep 20
+          done
+          xcrun stapler validate "dist/Lisdo.app"
+          spctl --assess --type execute --verbose=4 "dist/Lisdo.app"
+
+      - name: Package release DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LISDO_APP_VERSION="${RELEASE_VERSION#v}"
+          script/package_mac_release.sh
+
+      - name: Developer ID sign DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE="dist/release/Lisdo-${RELEASE_VERSION#v}.dmg"
+          codesign --force --timestamp --sign "$DEVELOPER_ID_APPLICATION" "$PACKAGE"
+          codesign --verify --verbose=4 "$PACKAGE"
+
+      - name: Submit DMG for notarization
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE="dist/release/Lisdo-${RELEASE_VERSION#v}.dmg"
+          DMG_NOTARY_OUTPUT="$RUNNER_TEMP/dmg-notary-submit.json"
+
+          set +e
+          xcrun notarytool submit "$PACKAGE" \
+            --key "$RUNNER_TEMP/notary/AuthKey_${NOTARY_KEY_ID}.p8" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait \
+            --output-format json | tee "$DMG_NOTARY_OUTPUT"
+          submit_status="${PIPESTATUS[0]}"
+          set -e
+
+          submission_id="$(ruby -rjson -e 'data = JSON.parse(File.read(ARGV[0])); print(data["id"].to_s)' "$DMG_NOTARY_OUTPUT")"
+          notary_status="$(ruby -rjson -e 'data = JSON.parse(File.read(ARGV[0])); print(data["status"].to_s)' "$DMG_NOTARY_OUTPUT")"
+          if [[ "$submit_status" != "0" || "$notary_status" != "Accepted" ]]; then
+            echo "DMG notarization failed with status: ${notary_status:-unknown}" >&2
+            if [[ -n "$submission_id" ]]; then
+              xcrun notarytool log "$submission_id" \
+                --key "$RUNNER_TEMP/notary/AuthKey_${NOTARY_KEY_ID}.p8" \
+                --key-id "$NOTARY_KEY_ID" \
+                --issuer "$NOTARY_ISSUER_ID" \
+                --team-id "$APPLE_TEAM_ID" || true
+            fi
+            exit 1
+          fi
+
+      - name: Staple notarized DMG and refresh checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE="dist/release/Lisdo-${RELEASE_VERSION#v}.dmg"
+          for attempt in {1..6}; do
+            if xcrun stapler staple "$PACKAGE"; then
+              break
+            fi
+            if [[ "$attempt" == "6" ]]; then
+              echo "Failed to staple DMG after $attempt attempts." >&2
+              exit 1
+            fi
+            echo "DMG notarization ticket is not available yet; retrying in 20 seconds."
+            sleep 20
+          done
+          xcrun stapler validate "$PACKAGE"
+          hdiutil verify "$PACKAGE"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$PACKAGE"
+          shasum -a 256 "$PACKAGE" > "$PACKAGE.sha256"
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PACKAGE="dist/release/Lisdo-${RELEASE_VERSION#v}.dmg"
+          RELEASE_NOTES=".github/releases/${RELEASE_VERSION}.md"
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_VERSION already exists."
+          elif [[ -f "$RELEASE_NOTES" ]]; then
+            gh release create "$RELEASE_VERSION" --draft --title "$RELEASE_VERSION" --notes-file "$RELEASE_NOTES"
+          else
+            gh release create "$RELEASE_VERSION" --draft --title "$RELEASE_VERSION" --notes "Lisdo ${RELEASE_VERSION}"
+          fi
+          gh release upload "$RELEASE_VERSION" "$PACKAGE" "$PACKAGE.sha256" --clobber
+          gh release edit "$RELEASE_VERSION" --draft=false
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lisdo-macos-${{ env.RELEASE_VERSION }}
+          path: |
+            dist/release/Lisdo-*.dmg
+            dist/release/Lisdo-*.dmg.sha256
+          if-no-files-found: error

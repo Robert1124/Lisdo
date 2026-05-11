@@ -15,6 +15,7 @@ public enum LisdoDraftPipelineError: Error, Equatable, LocalizedError, Sendable 
     case emptySourceText
     case emptyRecognizedText
     case unsupportedDirectAttachmentProvider(ProviderMode)
+    case providerModeMismatch(expected: ProviderMode, actual: ProviderMode)
 
     public var errorDescription: String? {
         switch self {
@@ -23,7 +24,9 @@ public enum LisdoDraftPipelineError: Error, Equatable, LocalizedError, Sendable 
         case .emptyRecognizedText:
             return "No OCR text was found."
         case .unsupportedDirectAttachmentProvider(let mode):
-            return "\(mode.rawValue) does not support direct image/audio attachments in Lisdo yet. Use OCR/transcript mode or choose an OpenAI-compatible provider."
+            return "\(mode.rawValue) does not support direct image attachments in Lisdo yet. Use OCR mode or choose an OpenAI-compatible provider."
+        case .providerModeMismatch(let expected, let actual):
+            return "Capture was queued for \(expected.rawValue), but the current draft provider is \(actual.rawValue)."
         }
     }
 }
@@ -277,6 +280,55 @@ public final class LisdoDraftPipeline: @unchecked Sendable {
         ).draft
     }
 
+    public func processPendingCapture(
+        _ captureItem: CaptureItem,
+        categories: [Category],
+        sourceTextOverride: String? = nil,
+        imageAttachment: TaskDraftImageAttachment? = nil,
+        audioAttachment: TaskDraftAudioAttachment? = nil,
+        preferredSchemaPreset: CategorySchemaPreset? = nil,
+        revisionInstructions: String? = nil,
+        options: TaskDraftProviderOptions
+    ) async throws -> LisdoDraftPipelineResult {
+        guard captureItem.preferredProviderMode == provider.mode else {
+            throw LisdoDraftPipelineError.providerModeMismatch(
+                expected: captureItem.preferredProviderMode,
+                actual: provider.mode
+            )
+        }
+
+        if (imageAttachment != nil || audioAttachment != nil), !supportsDirectAttachmentProvider(provider.mode) {
+            throw LisdoDraftPipelineError.unsupportedDirectAttachmentProvider(provider.mode)
+        }
+
+        let sourceText = try (
+            sourceTextOverride?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfLisdoEmpty
+                ?? captureItem.normalizedProcessableText().trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        guard !sourceText.isEmpty else {
+            throw LisdoDraftPipelineError.emptySourceText
+        }
+
+        do {
+            if captureItem.status == .rawCaptured {
+                try captureItem.transition(to: .pendingProcessing)
+            }
+            return try await processPending(
+                captureItem: captureItem,
+                sourceText: sourceText,
+                imageAttachment: imageAttachment,
+                audioAttachment: audioAttachment,
+                categories: categories,
+                preferredSchemaPreset: preferredSchemaPreset,
+                revisionInstructions: revisionInstructions,
+                options: options
+            )
+        } catch {
+            markFailedIfPossible(captureItem, error: error)
+            throw error
+        }
+    }
+
     private func process(
         captureItem: CaptureItem,
         sourceText: String,
@@ -329,7 +381,8 @@ public final class LisdoDraftPipeline: @unchecked Sendable {
             audioAttachment: audioAttachment
         )
 
-        let draft = try await provider.generateDraft(
+        let draft = try await TaskDraftProviderOutputRetry.generateDraft(
+            provider: provider,
             input: input,
             categories: categories,
             options: options
@@ -347,9 +400,9 @@ public final class LisdoDraftPipeline: @unchecked Sendable {
 
     private func supportsDirectAttachmentProvider(_ mode: ProviderMode) -> Bool {
         switch mode {
-        case .openAICompatibleBYOK, .minimax, .openRouter, .ollama, .lmStudio, .localModel:
+        case .openAICompatibleBYOK, .openRouter, .ollama, .lmStudio, .localModel:
             return true
-        case .anthropic, .gemini, .macOnlyCLI:
+        case .minimax, .anthropic, .gemini, .macOnlyCLI:
             return false
         }
     }

@@ -19,7 +19,9 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Lisdo uses the camera to capture notes, screenshots, and documents so they can become reviewable task drafts.</string>
 	<key>NSMicrophoneUsageDescription</key>

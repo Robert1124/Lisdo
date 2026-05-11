@@ -18,40 +18,41 @@ struct LisdoMenuBarCaptureView: View {
     @State private var isProcessingQueue = false
     @State private var isCapturingScreen = false
     @State private var isClipboardExpanded = false
-    @AppStorage(LisdoCaptureModePreferences.imageProcessingModeKey)
-    private var imageProcessingModeRawValue = LisdoImageProcessingMode.directLLM.rawValue
+    @Query(sort: \LisdoSyncedSettings.updatedAt, order: .reverse) private var syncedSettings: [LisdoSyncedSettings]
+    @State private var selectedProviderMode: ProviderMode = .openAICompatibleBYOK
+    @State private var imageProcessingModeRawValue = LisdoSyncedSettings.defaultImageProcessingModeRawValue
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            quickCapture
-            Divider()
             pendingSection
             Divider()
             todaySection
-            Divider()
-            footer
         }
         .frame(width: 390)
         .background(LisdoMacTheme.surface)
+        .onAppear(perform: loadSyncedSettings)
+        .onChange(of: syncedSettingsSnapshot) { _, _ in
+            loadSyncedSettings()
+        }
     }
 
     private var header: some View {
         HStack(spacing: 9) {
-            Image(systemName: "sparkles")
-                .font(.caption.weight(.bold))
-                .frame(width: 24, height: 24)
-                .background(LisdoMacTheme.ink1, in: RoundedRectangle(cornerRadius: 7))
-                .foregroundStyle(LisdoMacTheme.onAccent)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Lisdo")
-                    .font(.headline)
-                Text("Quick capture")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            LisdoLogoMark(size: 24, cornerRadius: 7)
+            Text("Lisdo")
+                .font(.headline)
             Spacer()
+            Button {
+                openQuickCapture()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .help("Quick capture")
+
             Button {
                 openMainWindow()
             } label: {
@@ -175,87 +176,28 @@ struct LisdoMenuBarCaptureView: View {
     }
 
     private var pendingSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Mac processing queue")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                    if !pendingCaptures.isEmpty {
-                        Text("\(pendingCaptures.count) total")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .foregroundStyle(LisdoMacTheme.onAccent)
-                            .background(LisdoMacTheme.ink1, in: Capsule())
+        Button {
+            openFromIPhoneQueue()
+        } label: {
+            HStack(spacing: 10) {
+                Text("Mac processing queue")
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                Text("\(pendingCaptures.count)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(pendingCaptures.isEmpty ? .secondary : LisdoMacTheme.onAccent)
+                    .frame(width: 28, height: 28)
+                    .background(pendingCaptures.isEmpty ? LisdoMacTheme.surface2 : LisdoMacTheme.ink1, in: Circle())
+                    .overlay {
+                        Circle()
+                            .strokeBorder(LisdoMacTheme.divider.opacity(0.68))
                     }
-                    Spacer()
-                    Button {
-                        Task {
-                            await processAllPendingCaptures()
-                        }
-                    } label: {
-                        Label(isProcessingQueue ? "Processing" : "Process All", systemImage: "sparkles")
-                    }
-                    .disabled(processablePendingCount == 0 || isProcessingQueue)
-                    .help("Process pending captures into reviewable drafts with the selected provider.")
-                }
-
-                HStack(spacing: 6) {
-                    QueueCountChip(title: "Pending", count: waitingPendingCount + retryPendingCount)
-                    QueueCountChip(title: "Processing", count: processingPendingCount)
-                    QueueCountChip(title: "Failed", count: failedPendingCount)
-                    QueueCountChip(title: "Drafts", count: draftReadyCaptureCount)
-                }
             }
-
-            if pendingCaptures.isEmpty {
-                LisdoCaptureStatusBanner(
-                    title: "Queue empty",
-                    message: "iPhone captures that require this Mac will appear here as pending items, then become drafts after processing.",
-                    tone: .idle
-                )
-            } else {
-                ForEach(pendingCaptures.prefix(3), id: \.id) { capture in
-                    HStack(spacing: 9) {
-                        Image(systemName: queueIcon(for: capture))
-                            .foregroundStyle(queueTone(for: capture).foregroundStyle)
-                            .frame(width: 18)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(capturePreview(capture))
-                                .font(.caption)
-                                .lineLimit(1)
-                            Text(pendingStatusText(capture))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if CaptureBatchSelector.processablePendingCaptures(from: [capture]).contains(where: { $0.id == capture.id }) {
-                            Button {
-                                Task {
-                                    await processAllPendingCaptures()
-                                }
-                            } label: {
-                                Image(systemName: "play")
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Process pending captures into drafts for review")
-                        }
-                        if capture.status == .failed {
-                            Button {
-                                retry(capture)
-                            } label: {
-                                Image(systemName: "arrow.clockwise")
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Queue this failed capture for retry")
-                        }
-                    }
-                }
-            }
+            .padding(14)
+            .contentShape(Rectangle())
         }
-        .padding(14)
+        .buttonStyle(.plain)
+        .help("Open the iPhone processing queue")
     }
 
     private var todaySection: some View {
@@ -280,34 +222,39 @@ struct LisdoMenuBarCaptureView: View {
             } else {
                 ForEach(todayTodos.prefix(3), id: \.id) { todo in
                     HStack(spacing: 8) {
-                        Image(systemName: "circle")
-                            .foregroundStyle(.secondary)
-                        Text(todo.title)
-                            .font(.caption)
-                            .lineLimit(1)
-                        Spacer()
-                        if let dueDateText = todo.dueDateText {
-                            Text(dueDateText)
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                        Button {
+                            toggleTodoCompletion(todo)
+                        } label: {
+                            Image(systemName: todo.status == .completed ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 18, height: 18)
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(todo.status == .completed ? "Reopen todo" : "Complete todo")
+
+                        Button {
+                            openTodo(todo)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(todo.title)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                if let dueDateText = todo.dueDateText {
+                                    Text(dueDateText)
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
         }
         .padding(14)
-    }
-
-    private var footer: some View {
-        HStack {
-            Spacer()
-            Button("Open Lisdo") {
-                openMainWindow()
-            }
-            .keyboardShortcut("o", modifiers: [.command])
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 
     private var pendingCaptures: [CaptureItem] {
@@ -390,7 +337,7 @@ struct LisdoMenuBarCaptureView: View {
         isProcessing = true
         setStatus(
             title: "Creating draft",
-            message: "\(LisdoMacMVP2Processing.providerModeLabel) is organizing this capture. It will need review before it can become a todo.",
+            message: "\(LisdoMacMVP2Processing.providerModeLabel(modelContext: modelContext)) is organizing this capture. It will need review before it can become a todo.",
             tone: .processing
         )
         defer { isProcessing = false }
@@ -485,7 +432,7 @@ struct LisdoMenuBarCaptureView: View {
                     sourceImageAssetId: "Menu bar selected screen region",
                     createdDevice: .mac
                 ),
-                providerMode: LisdoMacMVP2Processing.providerMode,
+                providerMode: LisdoMacMVP2Processing.providerMode(modelContext: modelContext),
                 reason: .textRecognitionFailed(error.localizedDescription)
             )
             modelContext.insert(item)
@@ -629,6 +576,47 @@ struct LisdoMenuBarCaptureView: View {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func openQuickCapture() {
+        openMainWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            NotificationCenter.default.post(name: LisdoMacNotifications.openCapture, object: nil)
+        }
+    }
+
+    private func openFromIPhoneQueue() {
+        openMainWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            NotificationCenter.default.post(name: LisdoMacNotifications.openFromIPhone, object: nil)
+        }
+    }
+
+    private func openTodo(_ todo: Todo) {
+        openMainWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            NotificationCenter.default.post(
+                name: LisdoMacNotifications.openTodo,
+                object: nil,
+                userInfo: [LisdoMacNotifications.todoIdUserInfoKey: todo.id]
+            )
+        }
+    }
+
+    private func toggleTodoCompletion(_ todo: Todo) {
+        CaptureBatchActions.toggleSavedTodoCompletion(todo)
+        do {
+            try modelContext.save()
+            Task { @MainActor in
+                await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
+            }
+        } catch {
+            setStatus(
+                title: "Could not update todo",
+                message: error.localizedDescription,
+                tone: .failure
+            )
+        }
+    }
+
     private func openVoiceCapture() {
         openMainWindow()
         NotificationCenter.default.post(name: LisdoMacNotifications.openCapture, object: nil)
@@ -639,8 +627,45 @@ struct LisdoMenuBarCaptureView: View {
         )
     }
 
+    private var syncedSettingsSnapshot: String {
+        guard let settings = syncedSettings.first else {
+            return "missing"
+        }
+
+        return [
+            settings.selectedProviderMode.rawValue,
+            settings.imageProcessingModeRawValue,
+            String(settings.updatedAt.timeIntervalSinceReferenceDate)
+        ].joined(separator: "|")
+    }
+
+    private func loadSyncedSettings() {
+        do {
+            let settings = try LisdoMacMVP2Processing.syncedSettings(modelContext: modelContext)
+            selectedProviderMode = settings.selectedProviderMode
+            imageProcessingModeRawValue = settings.imageProcessingModeRawValue
+        } catch {
+            selectedProviderMode = LisdoMacMVP2Processing.providerMode(modelContext: modelContext)
+            imageProcessingModeRawValue = LisdoMacMVP2Processing.imageProcessingMode(modelContext: modelContext).rawValue
+        }
+    }
+
     private var imageProcessingMode: LisdoImageProcessingMode {
         LisdoImageProcessingMode(rawValue: imageProcessingModeRawValue) ?? .visionOCR
+    }
+}
+
+struct LisdoLogoMark: View {
+    let size: CGFloat
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        Image("LisdoLogo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 

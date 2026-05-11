@@ -15,16 +15,23 @@ struct InboxView: View {
     var openDraft: (ProcessingDraft) -> Void
     var openPomodoro: (Todo) -> Void = { _ in }
 
+    @Query(sort: \LisdoSyncedSettings.updatedAt, order: .reverse) private var syncedSettings: [LisdoSyncedSettings]
+
+    private let providerFactory = DraftProviderFactory()
+    private let textRecognitionService = VisionTextRecognitionService()
+
     @State private var taskControlMessage: String?
     @State private var taskControlError: String?
     @State private var searchText = ""
     @State private var selectedCaptureStatus: CaptureStatus?
-    @State private var selectedProviderMode: ProviderMode?
     @State private var selectedCategoryId: String?
     @State private var selectedTodoStatus: TodoStatus?
     @State private var selectedPriority: TodoPriority?
     @State private var batchMessage: String?
     @State private var showingFilters = false
+    @State private var isProcessingIPhoneQueue = false
+    @State private var attemptedAutomaticIPhoneQueueIDs: Set<UUID> = []
+    @State private var selectedTodoDetail: TodoDetailSelection?
 
     var body: some View {
         ScrollView {
@@ -64,6 +71,19 @@ struct InboxView: View {
                                     categoryName: categoryName(for: draft.recommendedCategoryId),
                                     open: { openDraft(draft) }
                                 )
+                                .contextMenu {
+                                    Button {
+                                        saveDraftAsTodo(draft)
+                                    } label: {
+                                        Label("Save", systemImage: "checkmark")
+                                    }
+
+                                    Button(role: .destructive) {
+                                        deleteDraft(draft)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                     } header: {
@@ -100,17 +120,11 @@ struct InboxView: View {
                             )
                         } else {
                             ForEach(todayTodos, id: \.id) { todo in
-                                TodoCardView(
+                                CompactTodoCardView(
                                     todo: todo,
                                     categoryName: categoryName(for: todo.categoryId),
-                                    showsActiveTaskControls: true,
-                                    liveActivityDisabledText: liveActivityDisabledText,
-                                    onStart: { openPomodoro(todo) },
-                                    onAdvanceStep: { advanceActiveTaskStep(todo) },
-                                    onEnd: { endActiveTask(todo) },
-                                    onComplete: { completeTodo(todo) },
-                                    onToggleCompletion: { toggleTodoCompletion(todo) },
-                                    onToggleBlock: { block in toggleTodoBlock(block, in: todo) },
+                                    onOpen: { selectedTodoDetail = TodoDetailSelection(todoID: todo.id) },
+                                    onStartFocus: { openPomodoro(todo) },
                                     onDelete: { deleteTodo(todo) }
                                 )
                             }
@@ -130,17 +144,11 @@ struct InboxView: View {
                             )
                         } else {
                             ForEach(savedTodos, id: \.id) { todo in
-                                TodoCardView(
+                                CompactTodoCardView(
                                     todo: todo,
                                     categoryName: categoryName(for: todo.categoryId),
-                                    showsActiveTaskControls: true,
-                                    liveActivityDisabledText: liveActivityDisabledText,
-                                    onStart: { openPomodoro(todo) },
-                                    onAdvanceStep: { advanceActiveTaskStep(todo) },
-                                    onEnd: { endActiveTask(todo) },
-                                    onComplete: { completeTodo(todo) },
-                                    onToggleCompletion: { toggleTodoCompletion(todo) },
-                                    onToggleBlock: { block in toggleTodoBlock(block, in: todo) },
+                                    onOpen: { selectedTodoDetail = TodoDetailSelection(todoID: todo.id) },
+                                    onStartFocus: { openPomodoro(todo) },
                                     onDelete: { deleteTodo(todo) }
                                 )
                             }
@@ -178,13 +186,31 @@ struct InboxView: View {
         .sheet(isPresented: $showingFilters) {
             InboxFilterSheet(
                 selectedCaptureStatus: $selectedCaptureStatus,
-                selectedProviderMode: $selectedProviderMode,
                 selectedCategoryId: $selectedCategoryId,
                 selectedTodoStatus: $selectedTodoStatus,
                 selectedPriority: $selectedPriority,
                 categories: categories,
                 onClear: clearFilters
             )
+        }
+        .sheet(item: $selectedTodoDetail) { selection in
+            if let todo = todos.first(where: { $0.id == selection.todoID }) {
+                TodoDetailSheet(
+                    todo: todo,
+                    categories: categories,
+                    openPomodoro: openPomodoro
+                )
+                .presentationDetents([.fraction(0.78), .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(LisdoTheme.surface)
+            } else {
+                MissingTodoDetailView()
+                    .presentationDetents([.medium])
+                    .presentationBackground(LisdoTheme.surface)
+            }
+        }
+        .task(id: iPhonePendingQueueSignature) {
+            await processIPhonePendingCapturesIfNeeded(automatic: true)
         }
     }
 
@@ -202,30 +228,40 @@ struct InboxView: View {
 
     private var batchActions: some View {
         HStack(spacing: 10) {
-            Button {
-                retryFailedCaptures()
-            } label: {
-                Label("Retry failed", systemImage: "arrow.clockwise")
-                    .frame(maxWidth: .infinity)
+            BatchActionButton(
+                title: isProcessingIPhoneQueue ? "Working" : "Process",
+                systemImage: "sparkles",
+                isProminent: true,
+                isDisabled: iPhoneProcessablePendingCaptures.isEmpty || isProcessingIPhoneQueue
+            ) {
+                Task {
+                    await processIPhonePendingCapturesIfNeeded(automatic: false)
+                }
             }
-            .buttonStyle(.bordered)
-            .tint(LisdoTheme.ink1)
-            .disabled(CaptureBatchSelector.failedCaptures(from: captures).isEmpty)
 
-            Button {
-                archiveCompletedTodos()
-            } label: {
-                Label("Archive done", systemImage: "archivebox")
-                    .frame(maxWidth: .infinity)
+            BatchActionButton(
+                title: "Retry",
+                systemImage: "arrow.clockwise",
+                isProminent: false,
+                isDisabled: CaptureBatchSelector.failedCaptures(from: captures).isEmpty
+            ) {
+                retryFailedCaptures()
             }
-            .buttonStyle(.bordered)
-            .tint(LisdoTheme.ink1)
-            .disabled(todos.filter { $0.status == .completed }.isEmpty)
+
+            BatchActionButton(
+                title: "Archive",
+                systemImage: "archivebox",
+                isProminent: false,
+                isDisabled: todos.filter { $0.status == .completed }.isEmpty
+            ) {
+                archiveCompletedTodos()
+            }
         }
     }
 
     private var showsBatchActions: Bool {
-        !CaptureBatchSelector.failedCaptures(from: captures).isEmpty
+        !iPhoneProcessablePendingCaptures.isEmpty
+            || !CaptureBatchSelector.failedCaptures(from: captures).isEmpty
             || todos.contains { $0.status == .completed }
     }
 
@@ -251,8 +287,23 @@ struct InboxView: View {
         }
     }
 
+    private var iPhoneProcessablePendingCaptures: [CaptureItem] {
+        captures.filter(HostedProviderQueuePolicy.isIPhoneHostedPendingCandidate)
+    }
+
+    private var iPhonePendingQueueSignature: String {
+        let queueSignature = iPhoneProcessablePendingCaptures
+            .map { "\($0.id.uuidString):\($0.status.rawValue)" }
+            .sorted()
+            .joined(separator: "|")
+        let settingsSignature = syncedSettings.first.map {
+            "\($0.selectedProviderMode.rawValue):\($0.imageProcessingModeRawValue):\($0.voiceProcessingModeRawValue):\($0.updatedAt.timeIntervalSinceReferenceDate)"
+        } ?? "settings-missing"
+        return "\(queueSignature)#\(settingsSignature)"
+    }
+
     private var todayTodos: [Todo] {
-        filteredTodos.filter { todo in
+        visibleFilteredTodos.filter { todo in
             todo.status != .completed && (
                 Calendar.current.isDateInToday(todo.dueDate ?? .distantPast)
                 || Calendar.current.isDateInToday(todo.scheduledDate ?? .distantPast)
@@ -262,7 +313,7 @@ struct InboxView: View {
     }
 
     private var savedTodos: [Todo] {
-        filteredTodos.filter { todo in
+        visibleFilteredTodos.filter { todo in
             !todayTodos.contains(where: { $0.id == todo.id })
         }
     }
@@ -275,7 +326,7 @@ struct InboxView: View {
             query: AdvancedSearchQuery(
                 text: searchText.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 captureStatuses: selectedCaptureStatus.map { [$0] } ?? [],
-                providerModes: selectedProviderMode.map { [$0] } ?? [],
+                providerModes: [],
                 categoryIds: selectedCategoryId.map { [$0] } ?? [],
                 todoStatuses: selectedTodoStatus.map { [$0] } ?? [],
                 priorities: selectedPriority.map { [$0] } ?? []
@@ -286,11 +337,19 @@ struct InboxView: View {
     private var filteredCaptures: [CaptureItem] { filteredResult.captures }
     private var filteredDrafts: [ProcessingDraft] { filteredResult.drafts }
     private var filteredTodos: [Todo] { filteredResult.todos }
+    private var visibleFilteredTodos: [Todo] {
+        if let selectedTodoStatus {
+            return filteredTodos.filter { $0.status == selectedTodoStatus }
+        }
+
+        return filteredTodos.filter { todo in
+            todo.status == .open || todo.status == .inProgress
+        }
+    }
 
     private var hasActiveFilters: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || selectedCaptureStatus != nil
-            || selectedProviderMode != nil
             || selectedCategoryId != nil
             || selectedTodoStatus != nil
             || selectedPriority != nil
@@ -303,10 +362,74 @@ struct InboxView: View {
     private func clearFilters() {
         searchText = ""
         selectedCaptureStatus = nil
-        selectedProviderMode = nil
         selectedCategoryId = nil
         selectedTodoStatus = nil
         selectedPriority = nil
+    }
+
+    private func deleteDraft(_ draft: ProcessingDraft) {
+        let captureIds = CaptureDeletionPolicy.captureIdsToDelete(whenDeleting: draft, captures: captures)
+        for capture in captures where captureIds.contains(capture.id) {
+            modelContext.delete(capture)
+        }
+        modelContext.delete(draft)
+
+        do {
+            try modelContext.save()
+            batchMessage = "Deleted draft."
+        } catch {
+            batchMessage = "Could not delete draft: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveDraftAsTodo(_ draft: ProcessingDraft) {
+        let categoryId = categoryIdForSaving(draft)
+        draft.recommendedCategoryId = categoryId
+        draft.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.summary = draft.summary?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        draft.blocks = draft.blocks
+            .map { block in
+                var copy = block
+                copy.content = copy.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                return copy
+            }
+            .filter { !$0.content.isEmpty }
+
+        do {
+            let todo = try DraftApprovalConverter.convert(
+                draft,
+                categoryId: categoryId,
+                approval: DraftApproval(approvedByUser: true)
+            )
+            modelContext.insert(todo)
+            if let capture = captures.first(where: { $0.id == draft.captureItemId }) {
+                if capture.status == .processedDraft {
+                    try? capture.transition(to: .approvedTodo)
+                } else {
+                    capture.status = .approvedTodo
+                }
+            }
+            modelContext.delete(draft)
+            try modelContext.save()
+            Task { @MainActor in
+                await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
+            }
+            batchMessage = "Saved draft as todo."
+            reloadWidgetTimelines()
+        } catch {
+            batchMessage = "Could not save draft: \(error.localizedDescription)"
+        }
+    }
+
+    private func categoryIdForSaving(_ draft: ProcessingDraft) -> String {
+        if let recommendedCategoryId = draft.recommendedCategoryId,
+           categories.contains(where: { $0.id == recommendedCategoryId }) {
+            return recommendedCategoryId
+        }
+
+        return categories.first { $0.id == DefaultCategorySeeder.inboxCategoryId }?.id
+            ?? categories.first?.id
+            ?? DefaultCategorySeeder.inboxCategoryId
     }
 
     private func retryFailedCaptures() {
@@ -329,6 +452,161 @@ struct InboxView: View {
         } catch {
             batchMessage = "Could not archive completed todos: \(error.localizedDescription)"
         }
+    }
+
+    @MainActor
+    private func processIPhonePendingCapturesIfNeeded(automatic: Bool) async {
+        guard !isProcessingIPhoneQueue else { return }
+
+        let queue = iPhoneProcessablePendingCaptures.filter { capture in
+            !automatic || !attemptedAutomaticIPhoneQueueIDs.contains(capture.id)
+        }
+        guard !queue.isEmpty else { return }
+
+        isProcessingIPhoneQueue = true
+        defer { isProcessingIPhoneQueue = false }
+
+        var createdDrafts = 0
+        var providerUnavailable = 0
+        var failed = 0
+
+        for capture in queue {
+            do {
+                guard let provider = try providerFactory.makeProvider(for: capture.preferredProviderMode) else {
+                    providerUnavailable += 1
+                    continue
+                }
+
+                if automatic {
+                    attemptedAutomaticIPhoneQueueIDs.insert(capture.id)
+                }
+
+                let settings = providerFactory.loadSettings(for: capture.preferredProviderMode)
+                let pipeline = LisdoDraftPipeline(
+                    provider: provider,
+                    textRecognitionService: textRecognitionService,
+                    deviceType: .iPhone
+                )
+                let fallbackCategoryId = categories.first { $0.id == DefaultCategorySeeder.inboxCategoryId }?.id
+                    ?? categories.first?.id
+                    ?? DefaultCategorySeeder.inboxCategoryId
+                let attachmentContext = pendingAttachmentContext(for: capture)
+                let sourceText = pendingSourceText(for: capture, attachmentContext: attachmentContext)
+                let result = try await pipeline.processPendingCapture(
+                    capture,
+                    categories: categories,
+                    sourceTextOverride: sourceText,
+                    imageAttachment: attachmentContext.imageAttachment,
+                    audioAttachment: nil,
+                    preferredSchemaPreset: categories.first { $0.id == fallbackCategoryId }?.schemaPreset,
+                    options: TaskDraftProviderOptions(model: settings.model)
+                )
+                result.draft.recommendedCategoryId = result.draft.recommendedCategoryId ?? fallbackCategoryId
+                modelContext.insert(result.draft)
+                try modelContext.save()
+                deletePendingAttachmentsIfNeeded(for: capture)
+                createdDrafts += 1
+                await LisdoNotificationFeedback.postCaptureStatus(
+                    title: "Draft ready",
+                    body: "Lisdo processed an iPhone capture into a draft for review.",
+                    identifier: capture.id.uuidString
+                )
+            } catch {
+                let message = error.lisdoInboxUserMessage
+                if capture.status == .processing {
+                    try? capture.transition(to: .failed, error: message)
+                    try? modelContext.save()
+                } else if capture.status == .pendingProcessing || capture.status == .retryPending {
+                    try? capture.transition(to: .processing)
+                    try? capture.transition(to: .failed, error: message)
+                    try? modelContext.save()
+                }
+                failed += 1
+                await LisdoNotificationFeedback.postCaptureStatus(
+                    title: "Capture processing failed",
+                    body: message,
+                    identifier: capture.id.uuidString
+                )
+            }
+        }
+
+        if createdDrafts > 0 || providerUnavailable > 0 || failed > 0 || !automatic {
+            batchMessage = iPhoneQueueMessage(createdDrafts: createdDrafts, providerUnavailable: providerUnavailable, failed: failed)
+            reloadWidgetTimelines()
+        }
+    }
+
+    private func iPhoneQueueMessage(createdDrafts: Int, providerUnavailable: Int, failed: Int) -> String {
+        var parts: [String] = []
+        if createdDrafts > 0 {
+            parts.append("\(createdDrafts) iPhone capture\(createdDrafts == 1 ? "" : "s") became reviewable draft\(createdDrafts == 1 ? "" : "s").")
+        }
+        if providerUnavailable > 0 {
+            parts.append("\(providerUnavailable) capture\(providerUnavailable == 1 ? "" : "s") need a synced API key or provider settings.")
+        }
+        if failed > 0 {
+            parts.append("\(failed) capture\(failed == 1 ? "" : "s") failed and can be retried.")
+        }
+        return parts.isEmpty ? "No iPhone captures are ready to process." : parts.joined(separator: " ")
+    }
+
+    private func pendingAttachmentContext(for capture: CaptureItem) -> IPhonePendingAttachmentContext {
+        guard HostedProviderQueuePolicy.supportsDirectAttachments(capture.preferredProviderMode) else {
+            return IPhonePendingAttachmentContext()
+        }
+
+        let attachments = (try? LisdoPendingAttachmentStore(context: modelContext).fetchAttachments(forCaptureItemId: capture.id)) ?? []
+        guard !attachments.isEmpty else {
+            return IPhonePendingAttachmentContext()
+        }
+
+        let imageAttachments = attachments
+            .filter { $0.kind == .image }
+            .map {
+                TaskDraftImageAttachment(
+                    data: $0.data,
+                    mimeType: $0.mimeOrFormat,
+                    filename: $0.filename
+                )
+            }
+        let imageAttachmentSummary = attachments
+            .filter { $0.kind == .image }
+            .map { attachment in
+                let filename = attachment.filename?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "unnamed"
+                return "\(attachment.kind.rawValue) attachment \(filename), \(attachment.mimeOrFormat), \(attachment.data.count) bytes"
+            }
+            .joined(separator: "; ")
+            .nilIfEmpty
+
+        return IPhonePendingAttachmentContext(
+            imageAttachment: imageAttachments.first,
+            attachmentSummary: imageAttachmentSummary
+        )
+    }
+
+    private func pendingSourceText(
+        for capture: CaptureItem,
+        attachmentContext: IPhonePendingAttachmentContext
+    ) -> String? {
+        let baseText = (try? capture.normalizedProcessableText())?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+        let attachmentText = attachmentContext.attachmentSummary.map {
+            "Original image media included for direct provider analysis. \($0)"
+        }
+
+        return [
+            baseText,
+            attachmentText
+        ]
+        .compactMap { $0 }
+        .joined(separator: "\n\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .nilIfEmpty
+    }
+
+    private func deletePendingAttachmentsIfNeeded(for capture: CaptureItem) {
+        try? LisdoPendingAttachmentStore(context: modelContext).deleteAttachments(forCaptureItemId: capture.id)
     }
 
     private func captureStatusLabel(_ status: CaptureStatus) -> String {
@@ -450,11 +728,14 @@ struct InboxView: View {
 
     private func deleteTodo(_ todo: Todo) {
         taskControlError = nil
-        modelContext.delete(todo)
+        TodoTrashPolicy.moveToTrash([todo])
 
         guard saveTodoChanges() else { return }
+        Task { @MainActor in
+            await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
+        }
         reloadWidgetTimelines()
-        taskControlMessage = "Todo deleted."
+        taskControlMessage = "Todo moved to Trash."
     }
 
     private func saveTodoChanges() -> Bool {
@@ -474,11 +755,44 @@ struct InboxView: View {
     }
 }
 
+private struct TodoDetailSelection: Identifiable, Hashable {
+    let todoID: UUID
+    var id: UUID { todoID }
+}
+
+private struct MissingTodoDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.badge.xmark")
+                    .font(.system(size: 30))
+                    .foregroundStyle(LisdoTheme.ink3)
+                Text("Todo unavailable")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(LisdoTheme.ink1)
+                Text("This todo may have been deleted or synced away on another device.")
+                    .font(.callout)
+                    .foregroundStyle(LisdoTheme.ink3)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(LisdoTheme.surface)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 private struct InboxFilterSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @Binding var selectedCaptureStatus: CaptureStatus?
-    @Binding var selectedProviderMode: ProviderMode?
     @Binding var selectedCategoryId: String?
     @Binding var selectedTodoStatus: TodoStatus?
     @Binding var selectedPriority: TodoPriority?
@@ -494,13 +808,6 @@ private struct InboxFilterSheet: View {
                         Text("Any").tag(nil as CaptureStatus?)
                         ForEach(CaptureStatus.allCases, id: \.self) { status in
                             Text(status.rawValue.readableEnumLabel).tag(Optional(status))
-                        }
-                    }
-
-                    Picker("Provider", selection: $selectedProviderMode) {
-                        Text("Any").tag(nil as ProviderMode?)
-                        ForEach(DraftProviderFactory.supportedModes, id: \.self) { mode in
-                            Text(DraftProviderFactory.metadata(for: mode).displayName).tag(Optional(mode))
                         }
                     }
                 }
@@ -544,6 +851,58 @@ private struct InboxFilterSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+private struct IPhonePendingAttachmentContext {
+    var imageAttachment: TaskDraftImageAttachment?
+    var attachmentSummary: String?
+}
+
+private struct BatchActionButton: View {
+    var title: String
+    var systemImage: String
+    var isProminent: Bool
+    var isDisabled: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .foregroundStyle(foregroundColor)
+            .background(backgroundColor, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(borderColor, lineWidth: 1)
+            }
+            .opacity(isDisabled ? 0.46 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+    }
+
+    private var foregroundColor: Color {
+        if isDisabled { return LisdoTheme.ink4 }
+        return isProminent ? LisdoTheme.onAccent : LisdoTheme.ink1
+    }
+
+    private var backgroundColor: Color {
+        if isDisabled { return LisdoTheme.surface3.opacity(0.68) }
+        return isProminent ? LisdoTheme.ink1 : LisdoTheme.surface3.opacity(0.72)
+    }
+
+    private var borderColor: Color {
+        if isDisabled { return LisdoTheme.divider.opacity(0.5) }
+        return isProminent ? LisdoTheme.ink1 : LisdoTheme.divider.opacity(0.85)
     }
 }
 
@@ -601,15 +960,6 @@ struct DraftCardView: View {
                         }
                     }
                 }
-
-                HStack {
-                    Label("Edit", systemImage: "pencil")
-                    Spacer()
-                    Text("Save after review")
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(LisdoTheme.ink3)
-                .padding(.top, 2)
             }
             .padding(14)
             .lisdoDashedDraft()
@@ -682,8 +1032,8 @@ struct PendingCaptureRow: View {
             "Captured. Waiting for text extraction."
         case .pendingProcessing:
             capture.preferredProviderMode == .macOnlyCLI
-                ? "Waiting for Mac-only CLI processing."
-                : "Waiting for BYOK/OCR processing."
+                ? "Waiting for Mac CLI."
+                : "Ready for API processing."
         case .processing:
             "Processing into a draft."
         case .processedDraft:
@@ -693,7 +1043,7 @@ struct PendingCaptureRow: View {
         case .failed:
             capture.processingError ?? "Processing failed."
         case .retryPending:
-            "Retry is queued."
+            "Ready to retry."
         }
     }
 
@@ -714,11 +1064,11 @@ struct TodoCardView: View {
     var categoryName: String
     var showsActiveTaskControls = false
     var liveActivityDisabledText: String? = nil
+    var onOpen: () -> Void = {}
     var onStart: () -> Void = {}
     var onAdvanceStep: () -> Void = {}
     var onEnd: () -> Void = {}
     var onComplete: () -> Void = {}
-    var onToggleCompletion: (() -> Void)?
     var onToggleBlock: ((TodoBlock) -> Void)?
     var onDelete: (() -> Void)?
 
@@ -726,14 +1076,13 @@ struct TodoCardView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Button {
-                    onToggleCompletion?()
+                    onOpen()
                 } label: {
                     TodoStatusMark(status: todo.status)
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .disabled(onToggleCompletion == nil)
-                .accessibilityLabel(todo.status == .completed ? "Reopen todo" : "Complete todo")
+                .accessibilityLabel("Open todo")
                 .padding(.top, -3)
 
                 VStack(alignment: .leading, spacing: 5) {
@@ -763,18 +1112,6 @@ struct TodoCardView: View {
                 }
 
                 Spacer(minLength: 0)
-
-                if let onDelete {
-                    Button(role: .destructive) {
-                        onDelete()
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(LisdoTheme.ink3)
-                    .accessibilityLabel("Delete todo")
-                }
             }
 
             let blocks = todo.blocks?.sortedForInboxDisplay() ?? []
@@ -800,13 +1137,15 @@ struct TodoCardView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .lisdoCard()
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture(perform: onOpen)
         .contextMenu {
-            if let onToggleCompletion {
-                Button {
-                    onToggleCompletion()
-                } label: {
-                    Label(todo.status == .completed ? "Reopen Todo" : "Complete Todo", systemImage: todo.status == .completed ? "circle" : "checkmark.circle")
-                }
+            Button(action: onStart) {
+                Label("Start focus", systemImage: "timer")
+            }
+
+            Button(action: onOpen) {
+                Label("Edit", systemImage: "pencil")
             }
 
             if let onDelete {
@@ -817,6 +1156,123 @@ struct TodoCardView: View {
                 }
             }
         }
+    }
+}
+
+struct CompactTodoCardView: View {
+    var todo: Todo
+    var categoryName: String
+    var onOpen: () -> Void = {}
+    var onStartFocus: (() -> Void)?
+    var onDelete: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            TodoStatusMark(status: todo.status)
+                .frame(width: 22, height: 22)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 7) {
+                    LisdoCategoryDot(categoryId: todo.categoryId)
+                    Text(categoryName.uppercased())
+                        .tracking(0.6)
+                    if let dateLabel {
+                        CompactMetadataDivider()
+                        Text(dateLabel)
+                    }
+                    if let priority = todo.priority {
+                        CompactMetadataDivider()
+                        Text(priorityLabel(priority))
+                    }
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(LisdoTheme.ink3)
+                .lineLimit(1)
+
+                Text(todo.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(LisdoTheme.ink1)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let summary = todo.summary?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+                    Text(summary)
+                        .font(.system(size: 13))
+                        .lineSpacing(3)
+                        .foregroundStyle(LisdoTheme.ink3)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .lisdoCard(padding: 13)
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture(perform: onOpen)
+        .contextMenu {
+            if let onStartFocus {
+                Button(action: onStartFocus) {
+                    Label("Start focus", systemImage: "timer")
+                }
+            }
+
+            Button(action: onOpen) {
+                Label("Edit", systemImage: "pencil")
+            }
+
+            if let onDelete {
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    private var dateLabel: String? {
+        if let scheduledDate = todo.scheduledDate {
+            return "Scheduled \(dateLabel(for: scheduledDate))"
+        }
+        if let dueDate = todo.dueDate {
+            return "Due \(dateLabel(for: dueDate))"
+        }
+        return todo.dueDateText?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    private func dateLabel(for date: Date) -> String {
+        let calendar = Calendar.current
+        let includesTime = calendar.component(.hour, from: date) != 0
+            || calendar.component(.minute, from: date) != 0
+
+        if calendar.isDateInToday(date) {
+            return includesTime ? "today, \(date.formatted(.dateTime.hour().minute()))" : "today"
+        }
+        if calendar.isDateInTomorrow(date) {
+            return includesTime ? "tomorrow, \(date.formatted(.dateTime.hour().minute()))" : "tomorrow"
+        }
+        return includesTime
+            ? date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+            : date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    private func priorityLabel(_ priority: TodoPriority) -> String {
+        switch priority {
+        case .low:
+            "Low"
+        case .medium:
+            "Medium"
+        case .high:
+            "High"
+        }
+    }
+}
+
+private struct CompactMetadataDivider: View {
+    var body: some View {
+        Circle()
+            .fill(LisdoTheme.ink5)
+            .frame(width: 3, height: 3)
     }
 }
 
@@ -1003,7 +1459,7 @@ struct TodoStatusMark: View {
                     .foregroundStyle(LisdoTheme.onAccent)
                     .frame(width: 18, height: 18)
                     .background(LisdoTheme.ink1, in: Circle())
-            case .open, .archived:
+            case .open, .archived, .trashed:
                 EmptyView()
             }
         }
@@ -1190,6 +1646,18 @@ private extension Array where Element == TodoReminder {
 
             return lhs.id.uuidString < rhs.id.uuidString
         }
+    }
+}
+
+private extension Error {
+    var lisdoInboxUserMessage: String {
+        if let localizedError = self as? LocalizedError,
+           let description = localizedError.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+
+        return localizedDescription.isEmpty ? String(describing: self) : localizedDescription
     }
 }
 

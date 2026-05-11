@@ -1,11 +1,12 @@
 import LisdoCore
+import SwiftData
 import SwiftUI
 
 struct YouSettingsView: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var iCloudSyncStatusMonitor: LisdoICloudSyncStatusMonitor
 
     private let credentialStore = KeychainCredentialStore()
-    private let providerPreferenceStore = LisdoLocalProviderPreferenceStore()
     private let providerFactory = DraftProviderFactory()
 
     @State private var endpoint = ""
@@ -14,7 +15,7 @@ struct YouSettingsView: View {
     @State private var apiKey = ""
     @State private var keyStatus = "Not saved"
     @State private var providerMode = ProviderMode.openAICompatibleBYOK
-    @State private var providerModeStatus = "Saved on this iPhone only."
+    @State private var providerModeStatus = "Syncs between iPhone and Mac."
     @State private var notificationStatus = LisdoNotificationStatus(
         title: "Checking notifications",
         detail: "Notification permission is optional and never blocks capture.",
@@ -23,10 +24,8 @@ struct YouSettingsView: View {
         allowsDelivery: false
     )
     @State private var isRequestingNotifications = false
-    @AppStorage(LisdoCaptureModePreferences.imageProcessingModeKey)
-    private var imageProcessingModeRawValue = LisdoImageProcessingMode.directLLM.rawValue
-    @AppStorage(LisdoCaptureModePreferences.voiceProcessingModeKey)
-    private var voiceProcessingModeRawValue = LisdoVoiceProcessingMode.directLLM.rawValue
+    @State private var imageProcessingModeRawValue = LisdoSyncedSettings.defaultImageProcessingModeRawValue
+    @State private var voiceProcessingModeRawValue = LisdoSyncedSettings.defaultVoiceProcessingModeRawValue
 
     var body: some View {
         ScrollView {
@@ -52,13 +51,16 @@ struct YouSettingsView: View {
             loadProviderFields(for: newValue)
             saveProviderMode(newValue)
         }
+        .onChange(of: imageProcessingModeRawValue) { _, newValue in
+            saveImageProcessingMode(newValue)
+        }
+        .onChange(of: voiceProcessingModeRawValue) { _, newValue in
+            saveVoiceProcessingMode(newValue)
+        }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("You")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(LisdoTheme.ink1)
             Text("Local provider setup and product settings.")
                 .font(.system(size: 13))
                 .foregroundStyle(LisdoTheme.ink3)
@@ -91,11 +93,10 @@ struct YouSettingsView: View {
             Button {
                 iCloudSyncStatusMonitor.refresh()
             } label: {
-                Label("Refresh iCloud status", systemImage: "arrow.clockwise")
+                Label("Refresh status", systemImage: "arrow.clockwise")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
-            .tint(LisdoTheme.ink1)
+            .buttonStyle(LisdoTonalButtonStyle())
         }
         .lisdoCard()
     }
@@ -103,6 +104,12 @@ struct YouSettingsView: View {
     private var processingModeSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             LisdoSectionHeader(title: "Capture processing", detail: "Daily capture")
+
+            ProductStateRow(
+                icon: "icloud",
+                title: "Product settings sync",
+                message: "Selected provider mode and image input mode sync between iPhone and Mac. Voice captures always use transcript-first processing."
+            )
 
             Picker("Processing mode", selection: $providerMode) {
                 ForEach(DraftProviderFactory.supportedModes, id: \.self) { mode in
@@ -139,29 +146,28 @@ struct YouSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             LisdoSectionHeader(title: "Capture input", detail: "Image and voice")
 
-            Picker("Image input", selection: $imageProcessingModeRawValue) {
-                ForEach(LisdoImageProcessingMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode.rawValue)
+            Text("These product settings sync between iPhone and Mac. API keys use Keychain; Mac CLI paths and local provider details stay Mac-local.")
+                .font(.system(size: 12))
+                .lineSpacing(2)
+                .foregroundStyle(LisdoTheme.ink3)
+
+            LisdoSegmentedControl(
+                selection: $imageProcessingModeRawValue,
+                options: LisdoImageProcessingMode.allCases.map { mode in
+                    (value: mode.rawValue, title: imageInputTitle(for: mode))
                 }
-            }
-            .pickerStyle(.segmented)
+            )
 
             Text(selectedImageProcessingMode.detailText)
                 .font(.system(size: 12))
                 .lineSpacing(2)
                 .foregroundStyle(LisdoTheme.ink3)
 
-            Picker("Voice input", selection: $voiceProcessingModeRawValue) {
-                ForEach(LisdoVoiceProcessingMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            Text(selectedVoiceProcessingMode.detailText)
-                .font(.system(size: 12))
-                .lineSpacing(2)
-                .foregroundStyle(LisdoTheme.ink3)
+            ProductStateRow(
+                icon: "text.bubble",
+                title: "Voice uses transcript first",
+                message: selectedVoiceProcessingMode.detailText
+            )
         }
         .lisdoCard()
     }
@@ -196,8 +202,7 @@ struct YouSettingsView: View {
                         Label(actionTitle, systemImage: "bell")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(LisdoTheme.ink1)
+                    .buttonStyle(LisdoTonalButtonStyle())
                     .disabled(isRequestingNotifications)
                 }
 
@@ -207,8 +212,7 @@ struct YouSettingsView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .frame(maxWidth: notificationStatus.canRequestPermission ? nil : .infinity)
                 }
-                .buttonStyle(.bordered)
-                .tint(LisdoTheme.ink1)
+                .buttonStyle(LisdoTonalButtonStyle())
                 .disabled(isRequestingNotifications)
             }
         }
@@ -234,7 +238,7 @@ struct YouSettingsView: View {
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(LisdoProviderFieldStyle())
                 }
             }
 
@@ -244,7 +248,7 @@ struct YouSettingsView: View {
                     .foregroundStyle(LisdoTheme.ink3)
                 TextField("Model name", text: $model)
                     .textInputAutocapitalization(.never)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(LisdoProviderFieldStyle())
             }
 
             VStack(alignment: .leading, spacing: 7) {
@@ -252,7 +256,7 @@ struct YouSettingsView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(LisdoTheme.ink3)
                 TextField(selectedMetadata.displayName, text: $displayName)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(LisdoProviderFieldStyle())
             }
 
             VStack(alignment: .leading, spacing: 7) {
@@ -261,7 +265,7 @@ struct YouSettingsView: View {
                     .foregroundStyle(LisdoTheme.ink3)
                 SecureField("Stored locally in Keychain", text: $apiKey)
                     .textContentType(.password)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(LisdoProviderFieldStyle())
                     .disabled(!selectedMetadata.requiresAPIKey)
                 Text(keyStatus)
                     .font(.system(size: 11))
@@ -274,9 +278,8 @@ struct YouSettingsView: View {
                 Label("Save provider settings", systemImage: "key")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .tint(LisdoTheme.ink1)
+            .buttonStyle(LisdoTonalButtonStyle(height: 48))
         }
         .lisdoCard()
     }
@@ -286,7 +289,7 @@ struct YouSettingsView: View {
             Label("Secrets stay local", systemImage: "lock")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(LisdoTheme.ink1)
-            Text("API keys, CLI paths, OAuth tokens, and provider secrets do not sync through iCloud. OpenAI-compatible BYOK keys are saved only in the local Keychain.")
+            Text("Hosted BYOK API keys are saved in synchronizable Keychain with a local fallback. CLI paths, OAuth tokens, local model endpoints, and Mac provider secrets remain Mac-local and are not synced through iCloud.")
                 .font(.system(size: 12))
                 .lineSpacing(2)
                 .foregroundStyle(LisdoTheme.ink3)
@@ -296,8 +299,17 @@ struct YouSettingsView: View {
     }
 
     private func loadProviderSettings() {
-        providerMode = providerPreferenceStore.readProviderMode()
-        loadProviderFields(for: providerMode)
+        do {
+            let settings = try syncedSettingsStore.fetchOrCreateSettings()
+            providerMode = settings.selectedProviderMode
+            imageProcessingModeRawValue = LisdoSyncedSettings.normalizedImageProcessingModeRawValue(settings.imageProcessingModeRawValue)
+            voiceProcessingModeRawValue = LisdoSyncedSettings.normalizedVoiceProcessingModeRawValue(settings.voiceProcessingModeRawValue)
+            providerModeStatus = "Selected provider and input modes sync between iPhone and Mac."
+            loadProviderFields(for: providerMode)
+        } catch {
+            providerModeStatus = "Could not load synced settings: \(error.localizedDescription)"
+            loadProviderFields(for: providerMode)
+        }
     }
 
     private func loadProviderFields(for mode: ProviderMode) {
@@ -310,19 +322,37 @@ struct YouSettingsView: View {
         if DraftProviderFactory.metadata(for: mode).requiresAPIKey {
             let existingKey = (try? credentialStore.readAPIKey(for: mode)) ?? (mode == .openAICompatibleBYOK ? (try? credentialStore.readOpenAICompatibleAPIKey()) : nil)
             keyStatus = (existingKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
-                ? "API key is saved in the local Keychain."
+                ? "API key is saved in synchronizable Keychain with local fallback."
                 : "No API key saved for this provider."
         } else {
-            keyStatus = "No API key required. Local endpoints and model names are stored on this iPhone only."
+            keyStatus = "No API key required. CLI paths and local endpoints stay on the Mac that uses them."
         }
     }
 
     private func saveProviderMode(_ mode: ProviderMode) {
         do {
-            try providerPreferenceStore.saveProviderMode(mode)
-            providerModeStatus = "Capture mode saved locally on this iPhone."
+            try syncedSettingsStore.updateProviderMode(mode)
+            providerModeStatus = "Selected provider mode syncs between iPhone and Mac."
         } catch {
-            providerModeStatus = "Could not save capture mode: \(error)"
+            providerModeStatus = "Could not save synced provider mode: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveImageProcessingMode(_ rawValue: String) {
+        do {
+            let settings = try syncedSettingsStore.updateImageProcessingModeRawValue(rawValue)
+            imageProcessingModeRawValue = settings.imageProcessingModeRawValue
+        } catch {
+            providerModeStatus = "Could not save synced image input mode: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveVoiceProcessingMode(_ rawValue: String) {
+        do {
+            let settings = try syncedSettingsStore.updateVoiceProcessingModeRawValue(rawValue)
+            voiceProcessingModeRawValue = settings.voiceProcessingModeRawValue
+        } catch {
+            providerModeStatus = "Could not save synced voice transcript mode: \(error.localizedDescription)"
         }
     }
 
@@ -358,12 +388,16 @@ struct YouSettingsView: View {
                     try credentialStore.saveOpenAICompatibleAPIKey(trimmedKey)
                 }
                 apiKey = ""
-                keyStatus = "Provider settings saved. API key is local-only in Keychain."
+                keyStatus = selectedMetadata.requiresAPIKey
+                    ? "Provider settings saved. Hosted API key is in synchronizable Keychain."
+                    : "Provider settings saved. No API key is required."
             } else {
                 keyStatus = selectedMetadata.requiresAPIKey
                     ? "Provider settings saved. Existing Keychain key was left unchanged."
                     : "Provider settings saved locally. No secret is synced."
             }
+
+            _ = try? syncedSettingsStore.updateProviderMode(providerMode)
         } catch {
             keyStatus = "Could not save provider settings: \(error)"
         }
@@ -406,5 +440,18 @@ struct YouSettingsView: View {
 
     private var selectedVoiceProcessingMode: LisdoVoiceProcessingMode {
         LisdoVoiceProcessingMode(rawValue: voiceProcessingModeRawValue) ?? .speechTranscript
+    }
+
+    private func imageInputTitle(for mode: LisdoImageProcessingMode) -> String {
+        switch mode {
+        case .visionOCR:
+            return "OCR"
+        case .directLLM:
+            return "Image LLM"
+        }
+    }
+
+    private var syncedSettingsStore: LisdoSyncedSettingsStore {
+        LisdoSyncedSettingsStore(context: modelContext)
     }
 }

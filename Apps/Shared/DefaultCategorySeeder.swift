@@ -60,13 +60,14 @@ public enum DefaultCategorySeeder {
     @discardableResult
     public static func seedDefaults(in context: ModelContext) throws -> [Category] {
         try removeLegacyPlaceholderData(in: context)
+        try reconcileDefaultCategories(in: context)
 
         let existingCategories = try context.fetch(FetchDescriptor<Category>())
         let existingIds = Set(existingCategories.map(\.id))
-        let existingNames = Set(existingCategories.map { $0.name.localizedLowercase })
+        let existingNames = Set(existingCategories.map { normalizedCategoryName($0.name) })
 
         var insertedCategories: [Category] = []
-        for template in defaults where !existingIds.contains(template.id) && !existingNames.contains(template.name.localizedLowercase) {
+        for template in defaults where !existingIds.contains(template.id) && !existingNames.contains(normalizedCategoryName(template.name)) {
             let category = Category(
                 id: template.id,
                 name: template.name,
@@ -84,7 +85,116 @@ public enum DefaultCategorySeeder {
             try context.save()
         }
 
-        return existingCategories + insertedCategories
+        return try context.fetch(FetchDescriptor<Category>())
+    }
+
+    private static func reconcileDefaultCategories(in context: ModelContext) throws {
+        let categories = try context.fetch(FetchDescriptor<Category>())
+        guard !categories.isEmpty else { return }
+
+        let todos = try context.fetch(FetchDescriptor<Todo>())
+        let drafts = try context.fetch(FetchDescriptor<ProcessingDraft>())
+
+        for template in defaults {
+            let candidates = categories.filter { category in
+                category.id == template.id || normalizedCategoryName(category.name) == normalizedCategoryName(template.name)
+            }
+
+            guard let canonical = preferredDefaultCategory(
+                from: candidates,
+                template: template,
+                todos: todos,
+                drafts: drafts
+            ) else {
+                continue
+            }
+
+            let originalCanonicalId = canonical.id
+            if canonical.id != template.id {
+                canonical.id = template.id
+            }
+            applyMissingTemplateFields(template, to: canonical)
+
+            let duplicateIds = Set(candidates.map(\.id)).union([originalCanonicalId])
+            moveReferences(from: duplicateIds, to: template.id, todos: todos, drafts: drafts)
+
+            for duplicate in candidates where duplicate !== canonical {
+                context.delete(duplicate)
+            }
+        }
+    }
+
+    private static func preferredDefaultCategory(
+        from candidates: [Category],
+        template: CategoryTemplate,
+        todos: [Todo],
+        drafts: [ProcessingDraft]
+    ) -> Category? {
+        candidates.sorted { lhs, rhs in
+            let lhsIsCanonical = lhs.id == template.id
+            let rhsIsCanonical = rhs.id == template.id
+            if lhsIsCanonical != rhsIsCanonical {
+                return lhsIsCanonical
+            }
+
+            let lhsReferenceCount = referenceCount(for: lhs, todos: todos, drafts: drafts)
+            let rhsReferenceCount = referenceCount(for: rhs, todos: todos, drafts: drafts)
+            if lhsReferenceCount != rhsReferenceCount {
+                return lhsReferenceCount > rhsReferenceCount
+            }
+
+            return lhs.createdAt < rhs.createdAt
+        }
+        .first
+    }
+
+    private static func referenceCount(for category: Category, todos: [Todo], drafts: [ProcessingDraft]) -> Int {
+        todos.filter { $0.categoryId == category.id }.count
+            + drafts.filter { $0.recommendedCategoryId == category.id }.count
+    }
+
+    private static func applyMissingTemplateFields(_ template: CategoryTemplate, to category: Category) {
+        if category.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            category.name = template.name
+        }
+        if category.descriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            category.descriptionText = template.descriptionText
+        }
+        if category.formattingInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            category.formattingInstruction = template.formattingInstruction
+        }
+        if category.icon?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+            category.icon = template.icon
+        }
+        if category.color?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            category.color = template.color
+        }
+    }
+
+    private static func moveReferences(
+        from categoryIds: Set<String>,
+        to canonicalCategoryId: String,
+        todos: [Todo],
+        drafts: [ProcessingDraft]
+    ) {
+        for todo in todos where categoryIds.contains(todo.categoryId) && todo.categoryId != canonicalCategoryId {
+            todo.categoryId = canonicalCategoryId
+        }
+
+        for draft in drafts {
+            guard let recommendedCategoryId = draft.recommendedCategoryId,
+                  categoryIds.contains(recommendedCategoryId),
+                  recommendedCategoryId != canonicalCategoryId
+            else {
+                continue
+            }
+
+            draft.recommendedCategoryId = canonicalCategoryId
+        }
+    }
+
+    private static func normalizedCategoryName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
     }
 
     private static func removeLegacyPlaceholderData(in context: ModelContext) throws {

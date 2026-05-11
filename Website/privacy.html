@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Privacy Policy - Lisdo</title>
+    <meta
+      name="description"
+      content="Lisdo privacy policy for iPhone and Mac. Learn how Lisdo handles iCloud sync, BYOK provider keys, captures, drafts, and media."
+    >
+    <link rel="canonical" href="https://lisdo.robertw.me/privacy.html">
+    <link rel="icon" href="assets/lisdo-logo.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header doc-header">
+      <a class="brand" href="/" aria-label="Lisdo home">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/lisdo-logo.png" alt="">
+        </span>
+        <span>Lisdo</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="/#workflow" data-i18n="nav.workflow">Workflow</a>
+        <a href="/#surfaces" data-i18n="nav.surfaces">App surfaces</a>
+        <a href="/privacy.html" data-i18n="nav.privacy">Privacy</a>
+        <a href="/support.html" data-i18n="nav.support">Support</a>
+        <a href="/#faq" data-i18n="nav.faq">FAQ</a>
+      </nav>
+
+      <div class="header-actions">
+        <div class="language-toggle" aria-label="Language">
+          <button type="button" data-lang-option="zh" aria-pressed="false">中</button>
+          <button type="button" data-lang-option="en" aria-pressed="true">EN</button>
+        </div>
+        <a
+          class="icon-button"
+          href="https://github.com/Robert1124/Lisdo"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub repository"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 .5A11.5 11.5 0 0 0 8.4 22.9c.58.1.8-.25.8-.56v-2c-3.25.7-3.93-1.39-3.93-1.39-.53-1.35-1.3-1.72-1.3-1.72-1.06-.72.08-.7.08-.7 1.17.08 1.79 1.2 1.79 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.74-1.56-2.6-.3-5.33-1.3-5.33-5.79 0-1.28.46-2.33 1.2-3.15-.12-.3-.52-1.5.12-3.1 0 0 .98-.32 3.2 1.2A11.1 11.1 0 0 1 12 5.9c.99 0 1.98.13 2.91.4 2.22-1.52 3.2-1.2 3.2-1.2.64 1.6.24 2.8.12 3.1.75.82 1.2 1.87 1.2 3.15 0 4.5-2.74 5.49-5.35 5.78.42.37.8 1.08.8 2.18v3.03c0 .31.2.67.8.56A11.5 11.5 0 0 0 12 .5Z"></path>
+          </svg>
+        </a>
+      </div>
+    </header>
+
+    <main class="doc-main">
+      <section class="doc-hero section-pad">
+        <p class="doc-kicker" data-i18n="doc.kicker">Lisdo documentation</p>
+        <h1 data-i18n="privacy.title">Privacy Policy</h1>
+        <p data-i18n="privacy.intro">
+          Lisdo is a native task inbox for iPhone and Mac. It is designed around local review,
+          iCloud sync, and user-controlled AI provider settings.
+        </p>
+        <p class="doc-updated" data-i18n="privacy.updated">Last updated: May 9, 2026</p>
+      </section>
+
+      <section class="doc-content">
+        <article class="doc-card">
+          <h2 data-i18n="privacy.summaryTitle">Summary</h2>
+          <p data-i18n="privacy.summaryBody">
+            Lisdo does not sell personal data, does not show ads, and does not include third-party
+            tracking for advertising. Captures become AI drafts first, and a user must review and
+            approve a draft before it becomes a saved todo.
+          </p>
+        </article>
+
+        <article class="doc-card">
+          <h2 data-i18n="privacy.infoTitle">Information Lisdo Handles</h2>
+          <ul>
+            <li data-i18n="privacy.info1">Categories, captures, drafts, todos, todo blocks, and related status metadata.</li>
+            <li data-i18n="privacy.info2">Text you type, paste, import, share, or extract through OCR.</li>
+            <li data-i18n="privacy.info3">Transcripts when voice capture is available.</li>
+            <li data-i18n="privacy.info4">Optional image, audio, or file metadata needed to process a capture.</li>
+            <li data-i18n="privacy.info5">Local provider configuration such as provider mode and endpoint settings.</li>
+          </ul>
+        </article>
+
+        <article class="doc-card">
+          <h2 data-i18n="privacy.icloudTitle">iCloud Sync</h2>
+          <p data-i18n="privacy.icloudBody1">
+            Lisdo uses Apple iCloud infrastructure to sync app data between your iPhone and Mac.
+            Synced data may include categories, capture items, processing drafts, todos, todo
+            blocks, and pending queue metadata. Your iCloud account and Apple privacy controls
+            govern this sync.
+          </p>
+          <p data-i18n="privacy.icloudBody2">
+            Lisdo does not store API keys, provider secrets, OAuth tokens, or local CLI paths in
+            the CloudKit app database. Hosted BYOK API keys are stored in Keychain and may be
+            available on your devices through your Apple Keychain sync settings. Local CLI paths and
+            local-only provider settings stay on the Mac where they were configured.
+          </p>
+        </article>
+
+        <article class="doc-card">
+          <h2 data-i18n="privacy.byokTitle">BYOK AI Processing</h2>
+          <p data-i18n="privacy.byokBody1">
+            Lisdo's MVP provider model is bring-your-own-key. When you choose to organize a capture,
+            the relevant text, OCR text, transcript, category rules, and draft instructions may be
+            sent to the AI provider you configured. Provider handling is governed by that provider's
+            terms and privacy policy.
+          </p>
+          <p data-i18n="privacy.byokBody2">
+            Provider credentials are stored in Keychain. Hosted BYOK keys may sync through the
+            user's Keychain sync so iPhone and Mac can process drafts with the same provider
+            credentials; they are not stored as CloudKit records.
+          </p>
+        </article>
+
+        <article class="doc-card">
+          <h2 data-i18n="privacy.mediaTitle">Images, Audio, And Raw Media</h2>
+          <p data-i18n="privacy.mediaBody1">
+            Lisdo's default design is to run Apple Vision OCR on the device where an image is
+            captured or imported, then sync OCR text and metadata rather than the original image.
+            Audio capture is designed to keep transcript handling separate from AI drafting.
+          </p>
+          <p data-i18n="privacy.mediaBody2">
+            For Mac-only CLI or local-model modes, direct image or audio processing may temporarily
+            sync the original media to the Mac as a pending attachment. After Mac processing reaches
+            a completed or terminal failed state, Lisdo deletes those temporary pending media
+            attachments. Lisdo does not send provider secrets or CLI paths through the CloudKit app
+            database.
+          </p>
+        </article>
+
+        <article class="doc-card">
+          <h2 data-i18n="privacy.contactTitle">Contact</h2>
+          <p><span data-i18n="privacy.contactPrefix">For privacy questions or data handling requests, contact support through the options on the </span><a href="/support.html" data-i18n="privacy.contactLink">Support page</a><span data-i18n="privacy.contactSuffix">.</span></p>
+        </article>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/lisdo-logo.png" alt="">
+        </span>
+        <span>Lisdo</span>
+      </div>
+      <p data-i18n="footer.copy">Native AI task inbox for iPhone and Mac. Draft-first by design.</p>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <a href="https://github.com/Robert1124/Lisdo" target="_blank" rel="noopener noreferrer" data-i18n="footer.github">GitHub repo</a>
+        <a href="https://github.com/sponsors/Robert1124" target="_blank" rel="noopener noreferrer" data-i18n="footer.sponsor">Sponsor</a>
+      </nav>
+    </footer>
+    <script src="script.js"></script>
+  </body>
+</html>

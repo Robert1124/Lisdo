@@ -212,12 +212,7 @@ enum LisdoWidgetDataStore {
         let todaySnapshots = plan.sections
             .filter { $0.date == todayStart }
             .flatMap(\.todos)
-            .prefix(4)
-            .map { WidgetTask(snapshot: $0, categoryNames: categoryNames) }
-
-        let fallbackTasks = plan.sections
-            .flatMap(\.todos)
-            .prefix(4)
+            .sortedForTodayWidget()
             .map { WidgetTask(snapshot: $0, categoryNames: categoryNames) }
 
         let pendingCaptures = captures.filter(\.isWidgetPending)
@@ -228,9 +223,7 @@ enum LisdoWidgetDataStore {
             visibleCaptures: visibleCaptures,
             categoryNames: categoryNames
         )
-        let focus = activeTask.map { WidgetTask(activeTask: $0) }
-            ?? todaySnapshots.first
-            ?? fallbackTasks.first
+        let focus = todaySnapshots.first
         let state: WidgetDataState = (focus == nil && drafts.isEmpty && visibleCaptures.isEmpty)
             ? .empty
             : .content
@@ -244,7 +237,7 @@ enum LisdoWidgetDataStore {
             failedCaptureCount: failedCaptures.count,
             focus: focus,
             inboxItems: inboxItems,
-            todayItems: Array(todaySnapshots.isEmpty ? fallbackTasks : todaySnapshots),
+            todayItems: Array(todaySnapshots),
             activeTask: activeTask
         )
     }
@@ -377,7 +370,40 @@ private extension WidgetActiveTask {
     }
 }
 
+private extension Array where Element == DailyPlanTodoSnapshot {
+    func sortedForTodayWidget() -> [DailyPlanTodoSnapshot] {
+        sorted { lhs, rhs in
+            if lhs.status != rhs.status {
+                return lhs.status == .inProgress
+            }
+
+            if lhs.widgetSortDate != rhs.widgetSortDate {
+                switch (lhs.widgetSortDate, rhs.widgetSortDate) {
+                case let (lhsDate?, rhsDate?):
+                    return lhsDate < rhsDate
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    break
+                }
+            }
+
+            if lhs.title != rhs.title {
+                return lhs.title < rhs.title
+            }
+
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+}
+
 private extension DailyPlanTodoSnapshot {
+    var widgetSortDate: Date? {
+        scheduledDate ?? dueDate
+    }
+
     var widgetMetadata: String {
         if let scheduledDate {
             return Self.timeFormatter.string(from: scheduledDate)

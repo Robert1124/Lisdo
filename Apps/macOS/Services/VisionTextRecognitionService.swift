@@ -360,14 +360,30 @@ public final class MacOnlyCLIDraftProvider: TaskDraftProvider, @unchecked Sendab
         categories: [LisdoCore.Category],
         options: TaskDraftProviderOptions
     ) async throws -> ProcessingDraft {
+        let materializedAttachments = try CLIMediaAttachmentMaterializer.materialize(input: input)
+        defer { materializedAttachments.cleanup() }
+
+        var cliInput = input
+        if !materializedAttachments.promptContext.isEmpty {
+            cliInput.sourceText = [
+                input.sourceText.trimmingCharacters(in: .whitespacesAndNewlines),
+                materializedAttachments.promptContext
+            ]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        }
+
         var command = commandBuilder.makeCommand(
-            input: input,
+            input: cliInput,
             categories: categories,
             options: options
         )
         command.executablePath = settings.executablePath
         command.timeoutSeconds = settings.timeoutSeconds
         settings.environment.forEach { key, value in
+            command.environment[key] = value
+        }
+        materializedAttachments.environment.forEach { key, value in
             command.environment[key] = value
         }
 
@@ -377,6 +393,180 @@ public final class MacOnlyCLIDraftProvider: TaskDraftProvider, @unchecked Sendab
             captureItemId: input.captureItemId,
             provider: settings.descriptor
         )
+    }
+}
+
+private struct CLIMediaAttachmentMaterializer {
+    struct MaterializedAttachments {
+        var promptContext: String
+        var environment: [String: String]
+        var directoryURL: URL?
+
+        func cleanup() {
+            guard let directoryURL else { return }
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+    }
+
+    private struct FileDescriptor {
+        var kind: String
+        var filename: String
+        var format: String
+        var data: Data
+    }
+
+    static func materialize(input: TaskDraftInput) throws -> MaterializedAttachments {
+        let descriptors = fileDescriptors(input: input)
+        guard !descriptors.isEmpty else {
+            return MaterializedAttachments(promptContext: "", environment: [:], directoryURL: nil)
+        }
+
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LisdoCLI-\(UUID().uuidString)", isDirectory: true)
+
+        do {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            var lines: [String] = []
+            var imagePaths: [String] = []
+            var audioPaths: [String] = []
+            var usedFilenames = Set<String>()
+
+            for descriptor in descriptors {
+                let filename = uniqueFilename(
+                    preferred: descriptor.filename,
+                    fallback: "\(descriptor.kind).dat",
+                    usedFilenames: &usedFilenames
+                )
+                let fileURL = directoryURL.appendingPathComponent(filename, isDirectory: false)
+                try descriptor.data.write(to: fileURL, options: [.atomic])
+                lines.append("- \(descriptor.kind): \(fileURL.path) (\(descriptor.format), \(descriptor.data.count) bytes)")
+                if descriptor.kind == "image" {
+                    imagePaths.append(fileURL.path)
+                } else if descriptor.kind == "audio" {
+                    audioPaths.append(fileURL.path)
+                }
+            }
+
+            var environment: [String: String] = [:]
+            if !imagePaths.isEmpty {
+                environment["LISDO_IMAGE_ATTACHMENT_PATHS"] = imagePaths.joined(separator: ":")
+            }
+            if !audioPaths.isEmpty {
+                environment["LISDO_AUDIO_ATTACHMENT_PATHS"] = audioPaths.joined(separator: ":")
+            }
+
+            let promptContext = """
+            Direct media files were materialized on this Mac for CLI processing. Inspect these local paths if the selected CLI can read image or audio files:
+            \(lines.joined(separator: "\n"))
+            These files are temporary and will be deleted after this processing attempt. Return only Lisdo's strict draft JSON for user review.
+            """
+
+            return MaterializedAttachments(
+                promptContext: promptContext,
+                environment: environment,
+                directoryURL: directoryURL
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: directoryURL)
+            throw error
+        }
+    }
+
+    private static func fileDescriptors(input: TaskDraftInput) -> [FileDescriptor] {
+        var descriptors: [FileDescriptor] = []
+        for imageAttachment in input.allImageAttachments {
+            descriptors.append(
+                FileDescriptor(
+                    kind: "image",
+                    filename: sanitizedFilename(
+                        imageAttachment.filename,
+                        fallback: "image.\(imageFileExtension(for: imageAttachment.mimeType))"
+                    ),
+                    format: imageAttachment.mimeType,
+                    data: imageAttachment.data
+                )
+            )
+        }
+        for audioAttachment in input.allAudioAttachments {
+            descriptors.append(
+                FileDescriptor(
+                    kind: "audio",
+                    filename: sanitizedFilename(
+                        audioAttachment.filename,
+                        fallback: "audio.\(audioFileExtension(for: audioAttachment.format))"
+                    ),
+                    format: audioAttachment.format,
+                    data: audioAttachment.data
+                )
+            )
+        }
+        return descriptors
+    }
+
+    private static func sanitizedFilename(_ filename: String?, fallback: String) -> String {
+        guard let lastPathComponent = filename?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+            .map({ URL(fileURLWithPath: $0).lastPathComponent }),
+            !lastPathComponent.isEmpty,
+            lastPathComponent != "."
+        else {
+            return fallback
+        }
+
+        return lastPathComponent
+    }
+
+    private static func uniqueFilename(
+        preferred: String,
+        fallback: String,
+        usedFilenames: inout Set<String>
+    ) -> String {
+        let base = preferred.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? fallback
+        if usedFilenames.insert(base).inserted {
+            return base
+        }
+
+        let url = URL(fileURLWithPath: base)
+        let name = url.deletingPathExtension().lastPathComponent.nilIfEmpty ?? "attachment"
+        let pathExtension = url.pathExtension
+        var index = 2
+        while true {
+            let candidate = pathExtension.isEmpty ? "\(name)-\(index)" : "\(name)-\(index).\(pathExtension)"
+            if usedFilenames.insert(candidate).inserted {
+                return candidate
+            }
+            index += 1
+        }
+    }
+
+    private static func imageFileExtension(for mimeType: String) -> String {
+        switch mimeType.lowercased() {
+        case "image/jpeg", "image/jpg":
+            return "jpg"
+        case "image/heic":
+            return "heic"
+        case "image/tiff":
+            return "tiff"
+        case "image/gif":
+            return "gif"
+        default:
+            return "png"
+        }
+    }
+
+    private static func audioFileExtension(for format: String) -> String {
+        let lowercased = format.lowercased()
+        if lowercased.contains("wav") {
+            return "wav"
+        }
+        if lowercased.contains("mp3") || lowercased.contains("mpeg") {
+            return "mp3"
+        }
+        if lowercased.contains("caf") {
+            return "caf"
+        }
+        return "m4a"
     }
 }
 
@@ -439,22 +629,10 @@ public final class MacScreenCaptureService: @unchecked Sendable {
             throw MacScreenCaptureError.captureFailed
         }
 
-        if let image = captureWithCoreGraphics(rect: normalizedRect) {
-            return try pngData(from: image)
-        }
         if let image = try await captureWithScreenCaptureKit(rect: normalizedRect, displayID: displayID) {
             return try pngData(from: image)
         }
         throw MacScreenCaptureError.captureFailed
-    }
-
-    private func captureWithCoreGraphics(rect: CGRect) -> CGImage? {
-        CGWindowListCreateImage(
-            rect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.bestResolution, .boundsIgnoreFraming]
-        )
     }
 
     private func captureWithScreenCaptureKit(
@@ -543,12 +721,14 @@ public final class MacGlobalHotKeyRegistrar: @unchecked Sendable {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var callback: (@Sendable () -> Void)?
-    private var hotKeyID = EventHotKeyID(
-        signature: MacGlobalHotKeyRegistrar.eventSignature,
-        id: 1
-    )
+    private var hotKeyID: EventHotKeyID
 
-    public init() {}
+    public init(identifier: UInt32 = 1) {
+        self.hotKeyID = EventHotKeyID(
+            signature: MacGlobalHotKeyRegistrar.eventSignature,
+            id: identifier
+        )
+    }
 
     deinit {
         unregister()
@@ -836,10 +1016,19 @@ extension MacVoiceRecordingService: AVAudioRecorderDelegate {}
 public struct MacSpeechTranscriptionResult: Equatable, Sendable {
     public var transcript: String
     public var isFinal: Bool
+    public var languageCode: String?
+    public var confidence: Double
 
-    public init(transcript: String, isFinal: Bool) {
+    public init(
+        transcript: String,
+        isFinal: Bool,
+        languageCode: String? = nil,
+        confidence: Double = 0
+    ) {
         self.transcript = transcript
         self.isFinal = isFinal
+        self.languageCode = languageCode
+        self.confidence = confidence
     }
 }
 
@@ -888,13 +1077,21 @@ public final class MacSpeechTranscriptionService: @unchecked Sendable {
             throw MacSpeechTranscriptionError.speechRecognitionNotAuthorized(state)
         }
 
+        var candidates: [LisdoSpeechTranscriptCandidate] = []
         var lastError: Error?
         for candidateLocale in fallbackLocales(primary: locale) {
             do {
-                return try await transcribeAudioFileOnce(
+                let result = try await transcribeAudioFileOnce(
                     at: audioURL,
                     locale: candidateLocale,
                     contextualStrings: contextualStrings
+                )
+                candidates.append(
+                    LisdoSpeechTranscriptCandidate(
+                        text: result.transcript,
+                        languageCode: result.languageCode ?? candidateLocale.identifier,
+                        confidence: result.confidence
+                    )
                 )
             } catch let error as MacSpeechTranscriptionError {
                 lastError = error
@@ -904,6 +1101,15 @@ public final class MacSpeechTranscriptionService: @unchecked Sendable {
             } catch {
                 lastError = error
             }
+        }
+
+        if let bestCandidate = LisdoSpeechLocalePolicy.bestCandidate(candidates) {
+            return MacSpeechTranscriptionResult(
+                transcript: bestCandidate.text,
+                isFinal: true,
+                languageCode: bestCandidate.languageCode,
+                confidence: bestCandidate.confidence
+            )
         }
 
         throw lastError ?? MacSpeechTranscriptionError.emptyTranscript
@@ -955,7 +1161,9 @@ public final class MacSpeechTranscriptionService: @unchecked Sendable {
                         continuation.resume(
                             returning: MacSpeechTranscriptionResult(
                                 transcript: transcript,
-                                isFinal: result.isFinal
+                                isFinal: result.isFinal,
+                                languageCode: locale.identifier,
+                                confidence: self.averageConfidence(for: result.bestTranscription)
                             )
                         )
                     }
@@ -965,14 +1173,147 @@ public final class MacSpeechTranscriptionService: @unchecked Sendable {
     }
 
     private func fallbackLocales(primary: Locale) -> [Locale] {
-        var identifiers: [String] = [primary.identifier, "en_US", "zh_CN", "zh_Hans"]
-        var seen = Set<String>()
-        identifiers = identifiers.filter { identifier in
-            guard !seen.contains(identifier) else { return false }
-            seen.insert(identifier)
-            return true
+        LisdoSpeechLocalePolicy.candidateLocaleIdentifiers(primaryIdentifier: primary.identifier)
+            .map(Locale.init(identifier:))
+    }
+
+    private func averageConfidence(for transcription: SFTranscription) -> Double {
+        let confidenceValues = transcription.segments
+            .map(\.confidence)
+            .filter { $0 > 0 }
+
+        guard !confidenceValues.isEmpty else {
+            return 0
         }
-        return identifiers.map(Locale.init(identifier:))
+
+        let total = confidenceValues.reduce(0, +)
+        return Double(total / Float(confidenceValues.count))
+    }
+}
+
+@MainActor
+public final class MacLiveVoiceTranscriptionService: NSObject, ObservableObject {
+    @Published public private(set) var isRecording = false
+    @Published public private(set) var currentRecordingURL: URL?
+
+    private let speechService = MacSpeechTranscriptionService()
+    private var audioEngine: AVAudioEngine?
+
+    public override init() {
+        super.init()
+    }
+
+    public func microphoneAuthorizationState() -> MacMicrophoneAuthorizationState {
+        MacMicrophoneAuthorizationState(AVCaptureDevice.authorizationStatus(for: .audio))
+    }
+
+    public func startRecording(
+        onTranscript: @escaping @MainActor @Sendable (MacSpeechTranscriptionResult) -> Void
+    ) async throws {
+        guard !isRecording else { return }
+        _ = onTranscript
+
+        try await requestMicrophoneAccess()
+        try await requestSpeechRecognitionAccess()
+        discardRecording()
+
+        let audioEngine = AVAudioEngine()
+        let inputNode = audioEngine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        let recordingURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lisdo-live-voice-\(UUID().uuidString)")
+            .appendingPathExtension("caf")
+        let audioFile = try AVAudioFile(forWriting: recordingURL, settings: inputFormat.settings)
+
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+            try? audioFile.write(from: buffer)
+        }
+
+        audioEngine.prepare()
+        try audioEngine.start()
+
+        self.audioEngine = audioEngine
+        currentRecordingURL = recordingURL
+        isRecording = true
+    }
+
+    public func stopAndTranscribe() async throws -> MacSpeechTranscriptionResult {
+        guard let recordingURL = currentRecordingURL else {
+            throw MacVoiceRecordingError.noActiveRecording
+        }
+
+        stopAudioEngine()
+
+        do {
+            let result = try await speechService.transcribeAudioFile(at: recordingURL)
+            try? FileManager.default.removeItem(at: recordingURL)
+            currentRecordingURL = nil
+            return result
+        } catch {
+            try? FileManager.default.removeItem(at: recordingURL)
+            currentRecordingURL = nil
+            throw error
+        }
+    }
+
+    public func discardRecording() {
+        stopAudioEngine()
+        if let currentRecordingURL {
+            try? FileManager.default.removeItem(at: currentRecordingURL)
+        }
+        currentRecordingURL = nil
+    }
+
+    private func stopAudioEngine() {
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        audioEngine = nil
+        isRecording = false
+    }
+
+    private func requestMicrophoneAccess() async throws {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return
+        case .denied:
+            throw MacVoiceRecordingError.microphoneNotAuthorized(.denied)
+        case .restricted:
+            throw MacVoiceRecordingError.microphoneNotAuthorized(.restricted)
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            guard granted else {
+                throw MacVoiceRecordingError.microphoneNotAuthorized(.denied)
+            }
+        @unknown default:
+            throw MacVoiceRecordingError.microphoneNotAuthorized(.restricted)
+        }
+    }
+
+    private func requestSpeechRecognitionAccess() async throws {
+        switch speechService.authorizationState() {
+        case .authorized:
+            return
+        case .notDetermined:
+            let requestedState = await speechService.requestSpeechRecognitionAuthorization()
+            guard requestedState == .authorized else {
+                throw MacSpeechTranscriptionError.speechRecognitionNotAuthorized(requestedState)
+            }
+        case .denied, .restricted:
+            throw MacSpeechTranscriptionError.speechRecognitionNotAuthorized(speechService.authorizationState())
+        }
+    }
+
+    private static func averageConfidence(for transcription: SFTranscription) -> Double {
+        let confidenceValues = transcription.segments
+            .map(\.confidence)
+            .filter { $0 > 0 }
+
+        guard !confidenceValues.isEmpty else {
+            return 0
+        }
+
+        let total = confidenceValues.reduce(0, +)
+        return Double(total / Float(confidenceValues.count))
     }
 }
 

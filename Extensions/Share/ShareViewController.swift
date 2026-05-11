@@ -221,8 +221,10 @@ private final class ShareIngestionViewModel: ObservableObject {
             let container = try ShareExtensionModelContainerFactory.makeCloudKitContainer()
             modelContainer = container
             let context = container.mainContext
+            let selectedProviderMode = try ShareSyncedSettingsReader.selectedProviderMode(context: context)
 
             for item in extractedItems {
+                item.capture.preferredProviderMode = selectedProviderMode
                 context.insert(item.capture)
             }
 
@@ -249,10 +251,13 @@ private enum ShareExtensionModelContainerFactory {
 
     static var schema: Schema {
         Schema([
+            LisdoSyncedSettings.self,
+            LisdoPendingRawCaptureAttachment.self,
             Category.self,
             CaptureItem.self,
             ProcessingDraft.self,
             Todo.self,
+            TodoReminder.self,
             TodoBlock.self
         ])
     }
@@ -266,6 +271,38 @@ private enum ShareExtensionModelContainerFactory {
         )
 
         return try ModelContainer(for: schema, configurations: [configuration])
+    }
+}
+
+private enum ShareSyncedSettingsReader {
+    static func selectedProviderMode(context: ModelContext) throws -> ProviderMode {
+        let singletonId = LisdoSyncedSettings.singletonId
+        let descriptor = FetchDescriptor<LisdoSyncedSettings>(
+            predicate: #Predicate { settings in
+                settings.id == singletonId
+            },
+            sortBy: [
+                SortDescriptor(\LisdoSyncedSettings.updatedAt, order: .reverse)
+            ]
+        )
+
+        let matches = try context.fetch(descriptor)
+        if let settings = matches.first {
+            for duplicate in matches.dropFirst() {
+                context.delete(duplicate)
+            }
+            if settings.normalizeInvalidRawValues(), context.hasChanges {
+                try context.save()
+            } else if context.hasChanges {
+                try context.save()
+            }
+            return settings.selectedProviderMode
+        }
+
+        let settings = LisdoSyncedSettings()
+        context.insert(settings)
+        try context.save()
+        return settings.selectedProviderMode
     }
 }
 
@@ -418,7 +455,7 @@ private enum ShareAttachmentExtractor {
                 userNote: "Created by Lisdo Share Extension",
                 createdDevice: .iPhone,
                 status: .pendingProcessing,
-                preferredProviderMode: .macOnlyCLI
+                preferredProviderMode: .openAICompatibleBYOK
             ),
             title: title,
             detail: detail,
@@ -440,7 +477,7 @@ private enum ShareAttachmentExtractor {
                 userNote: "Created by Lisdo Share Extension",
                 createdDevice: .iPhone,
                 status: .failed,
-                preferredProviderMode: .macOnlyCLI,
+                preferredProviderMode: .openAICompatibleBYOK,
                 processingError: error
             ),
             title: title,

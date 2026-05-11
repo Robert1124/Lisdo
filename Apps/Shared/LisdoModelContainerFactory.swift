@@ -7,6 +7,8 @@ public enum LisdoModelContainerFactory {
 
     public static var schema: Schema {
         Schema([
+            LisdoSyncedSettings.self,
+            LisdoPendingRawCaptureAttachment.self,
             Category.self,
             CaptureItem.self,
             ProcessingDraft.self,

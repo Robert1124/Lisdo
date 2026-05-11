@@ -98,6 +98,35 @@ public enum CaptureBatchSelector {
     }
 }
 
+public enum HostedProviderQueuePolicy {
+    public static let hostedProviderModes: Set<ProviderMode> = [
+        .openAICompatibleBYOK,
+        .minimax,
+        .anthropic,
+        .gemini,
+        .openRouter
+    ]
+
+    public static func isHostedProviderMode(_ mode: ProviderMode) -> Bool {
+        hostedProviderModes.contains(mode)
+    }
+
+    public static func supportsDirectAttachments(_ mode: ProviderMode) -> Bool {
+        switch mode {
+        case .openAICompatibleBYOK, .minimax, .openRouter:
+            return true
+        case .anthropic, .gemini, .macOnlyCLI, .ollama, .lmStudio, .localModel:
+            return false
+        }
+    }
+
+    public static func isIPhoneHostedPendingCandidate(_ capture: CaptureItem) -> Bool {
+        capture.createdDevice == .iPhone
+            && isHostedProviderMode(capture.preferredProviderMode)
+            && CaptureBatchSelector.processablePendingCaptures(from: [capture]).contains { $0.id == capture.id }
+    }
+}
+
 public enum CaptureDeletionPolicy {
     public static func canDeleteCapture(_ capture: CaptureItem) -> Bool {
         capture.status != .approvedTodo
@@ -164,6 +193,84 @@ public enum CaptureBatchActions {
             }
         }
         todo.updatedAt = updatedAt
+    }
+}
+
+public enum TodoTrashPolicy {
+    public static let retentionDays = 30
+
+    @discardableResult
+    public static func moveToTrash(
+        _ todos: [Todo],
+        trashedAt: Date = Date()
+    ) -> [Todo] {
+        let candidates = todos.filter { $0.status != .trashed }
+
+        for todo in candidates {
+            todo.status = .trashed
+            todo.updatedAt = trashedAt
+        }
+
+        return candidates
+    }
+
+    public static func expiredTrashedTodos(
+        _ todos: [Todo],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [Todo] {
+        let fallbackCutoff = now.addingTimeInterval(-Double(retentionDays) * 24 * 60 * 60)
+        let cutoff = calendar.date(byAdding: .day, value: -retentionDays, to: now) ?? fallbackCutoff
+
+        return todos.filter { todo in
+            todo.status == .trashed && todo.updatedAt < cutoff
+        }
+    }
+}
+
+public enum LisdoCategorySmartListKind: String, CaseIterable, Sendable {
+    case today
+    case drafts
+    case archive
+    case trash
+    case attention
+
+    public static let defaultKinds: [LisdoCategorySmartListKind] = [
+        .today,
+        .drafts,
+        .archive,
+        .trash,
+        .attention
+    ]
+
+    public var title: String {
+        switch self {
+        case .today:
+            "Today"
+        case .drafts:
+            "AI Drafts"
+        case .archive:
+            "Archive"
+        case .trash:
+            "Trash"
+        case .attention:
+            "Needs attention"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .today:
+            "calendar"
+        case .drafts:
+            "sparkle"
+        case .archive:
+            "archivebox"
+        case .trash:
+            "trash"
+        case .attention:
+            "exclamationmark.circle"
+        }
     }
 }
 

@@ -17,7 +17,7 @@ struct LisdoMacSidebarView: View {
                 Section {
                     sidebarRow(
                         title: "Inbox",
-                        detail: "\(drafts.count) drafts",
+                        detail: "\(drafts.count) drafts · \(activeTodos.count) saved",
                         systemImage: "tray",
                         count: inboxCount
                     )
@@ -53,12 +53,30 @@ struct LisdoMacSidebarView: View {
                         count: fromIPhoneCount
                     )
                     .tag(LisdoMacSelection.fromIPhone)
+
+                    sidebarRow(
+                        title: "Archive",
+                        detail: "Completed todos",
+                        systemImage: "archivebox",
+                        count: archiveCount
+                    )
+                    .tag(LisdoMacSelection.archive)
+
+                    sidebarRow(
+                        title: "Trash",
+                        detail: "Deleted for 30 days",
+                        systemImage: "trash",
+                        count: trashCount
+                    )
+                    .tag(LisdoMacSelection.trash)
                 }
 
                 Section {
                     ForEach(categories, id: \.id) { category in
                         HStack(spacing: 10) {
-                            LisdoCategoryDot(category: category)
+                            Image(systemName: categoryIconName(category))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(category.name)
                                     .lineLimit(1)
@@ -68,7 +86,7 @@ struct LisdoMacSidebarView: View {
                                     .lineLimit(1)
                             }
                             Spacer()
-                            Text("\(todos.inCategory(category.id).count)")
+                            Text("\(activeTodos.inCategory(category.id).count)")
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
@@ -117,7 +135,21 @@ struct LisdoMacSidebarView: View {
     }
 
     private var inboxCount: Int {
-        drafts.count + captures.filter { $0.status != .approvedTodo }.count
+        drafts.count + pendingInboxCount + activeTodos.count
+    }
+
+    private var pendingInboxCount: Int {
+        captures.filter { capture in
+            capture.status == .rawCaptured
+            || capture.status == .pendingProcessing
+            || capture.status == .processing
+            || capture.status == .failed
+            || capture.status == .retryPending
+        }.count
+    }
+
+    private var activeTodos: [Todo] {
+        todos.filter { $0.status == .open || $0.status == .inProgress }
     }
 
     private var todayCount: Int {
@@ -134,7 +166,20 @@ struct LisdoMacSidebarView: View {
     }
 
     private var fromIPhoneCount: Int {
-        captures.filter { $0.createdDevice == .iPhone || $0.preferredProviderMode == .macOnlyCLI || $0.status == .pendingProcessing }.count
+        LisdoMacMVP2Processing.pendingQueue(from: captures).count
+    }
+
+    private var archiveCount: Int {
+        todos.filter { $0.status == .completed || $0.status == .archived }.count
+    }
+
+    private var trashCount: Int {
+        todos.filter { $0.status == .trashed }.count
+    }
+
+    private func categoryIconName(_ category: Category) -> String {
+        let trimmed = category.icon?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "folder" : trimmed
     }
 
     private func sidebarRow(

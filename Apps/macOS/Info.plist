@@ -15,12 +15,16 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Lisdo records voice captures so you can review the transcript before creating a task draft.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Lisdo uses speech recognition to turn voice captures into transcripts for draft review.</string>
+	<key>SUFeedURL</key>
+	<string>https://lisdo.robertw.me/appcast.xml</string>
 </dict>
 </plist>

@@ -27,7 +27,6 @@ public enum LisdoImageProcessingMode: String, CaseIterable, Identifiable, Sendab
 
 public enum LisdoVoiceProcessingMode: String, CaseIterable, Identifiable, Sendable {
     case speechTranscript = "speech-transcript"
-    case directLLM = "direct-llm"
 
     public var id: String { rawValue }
 
@@ -35,17 +34,13 @@ public enum LisdoVoiceProcessingMode: String, CaseIterable, Identifiable, Sendab
         switch self {
         case .speechTranscript:
             return "Speech transcript"
-        case .directLLM:
-            return "Send audio to LLM"
         }
     }
 
     public var detailText: String {
         switch self {
         case .speechTranscript:
-            return "Lisdo transcribes audio locally first, lets you review the transcript, then sends text to the provider."
-        case .directLLM:
-            return "Lisdo sends the audio attachment to the selected provider for direct transcription and task extraction."
+            return "Lisdo transcribes audio locally first, then sends the transcript text to the selected provider."
         }
     }
 }
@@ -67,7 +62,7 @@ public enum LisdoCaptureModePreferences {
         guard let rawValue = userDefaults.string(forKey: voiceProcessingModeKey),
               let mode = LisdoVoiceProcessingMode(rawValue: rawValue)
         else {
-            return .directLLM
+            return .speechTranscript
         }
         return mode
     }

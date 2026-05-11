@@ -12,10 +12,12 @@ struct CategoriesView: View {
     var todos: [Todo]
     var drafts: [ProcessingDraft]
     var captures: [CaptureItem]
+    var openDraft: (ProcessingDraft) -> Void = { _ in }
     var openPomodoro: (Todo) -> Void = { _ in }
 
     @State private var editingCategory: CategoryEditorState?
     @State private var categoryMessage: String?
+    @State private var pendingDeleteConfirmation: CategoryDeleteConfirmation?
 
     var body: some View {
         ScrollView {
@@ -32,11 +34,11 @@ struct CategoriesView: View {
                         NavigationLink {
                             CategoryDetailView(
                                 category: category,
-                                todos: todosForCategory(category.id),
+                                todos: activeTodosForCategory(category.id),
                                 openPomodoro: openPomodoro
                             )
                         } label: {
-                            CategoryTile(category: category, count: todosForCategory(category.id).count)
+                            CategoryTile(category: category, count: activeTodosForCategory(category.id).count)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -53,10 +55,27 @@ struct CategoriesView: View {
 
                 Section {
                     VStack(spacing: 0) {
-                        SmartListRow(icon: "calendar", title: "Today", detail: "\(todayCount) due")
-                        SmartListRow(icon: "sparkle", title: "AI Drafts", detail: "\(drafts.count) ready")
-                        SmartListRow(icon: "tray", title: "Captured without draft", detail: "\(pendingCount) items")
-                        SmartListRow(icon: "exclamationmark.circle", title: "Needs attention", detail: "\(failedCount) failed", showDivider: false)
+                        ForEach(Array(LisdoCategorySmartListKind.defaultKinds.enumerated()), id: \.element) { index, kind in
+                            NavigationLink {
+                                CategorySmartListDetailView(
+                                    kind: kind,
+                                    todos: todos,
+                                    drafts: drafts,
+                                    captures: captures,
+                                    categories: categories,
+                                    openDraft: openDraft,
+                                    openPomodoro: openPomodoro
+                                )
+                            } label: {
+                                SmartListRow(
+                                    icon: kind.systemImage,
+                                    title: kind.title,
+                                    detail: smartListDetail(for: kind),
+                                    showDivider: index < LisdoCategorySmartListKind.defaultKinds.count - 1
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .lisdoCard(padding: 0)
                 } header: {
@@ -75,13 +94,25 @@ struct CategoriesView: View {
                 onDelete: { category in deleteCategory(category) }
             )
         }
+        .confirmationDialog(
+            "Delete category?",
+            isPresented: deleteConfirmationBinding,
+            titleVisibility: .visible,
+            presenting: pendingDeleteConfirmation
+        ) { confirmation in
+            Button("Delete category", role: .destructive) {
+                confirmDeleteCategory(confirmation.category)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteConfirmation = nil
+            }
+        } message: { confirmation in
+            Text(confirmation.message)
+        }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("Categories")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(LisdoTheme.ink1)
             Text("\(categories.count) active categories")
                 .font(.system(size: 13))
                 .foregroundStyle(LisdoTheme.ink3)
@@ -101,21 +132,10 @@ struct CategoriesView: View {
     }
 
     private var todayCount: Int {
-        todos.filter {
+        activeTodos.filter {
             Calendar.current.isDateInToday($0.dueDate ?? .distantPast)
             || Calendar.current.isDateInToday($0.scheduledDate ?? .distantPast)
             || ($0.dueDateText?.localizedCaseInsensitiveContains("today") == true)
-        }.count
-    }
-
-    private var pendingCount: Int {
-        captures.filter {
-            switch $0.status {
-            case .rawCaptured, .pendingProcessing, .processing, .failed, .retryPending:
-                true
-            case .processedDraft, .approvedTodo:
-                false
-            }
         }.count
     }
 
@@ -123,28 +143,112 @@ struct CategoriesView: View {
         captures.filter { $0.status == .failed }.count
     }
 
-    private func todosForCategory(_ id: String) -> [Todo] {
-        todos.filter { $0.categoryId == id }
+    private var archivedCount: Int {
+        todos.filter { $0.status == .completed || $0.status == .archived }.count
+    }
+
+    private var trashedCount: Int {
+        todos.filter { $0.status == .trashed }.count
+    }
+
+    private var activeTodos: [Todo] {
+        todos.filter { $0.status == .open || $0.status == .inProgress }
+    }
+
+    private func activeTodosForCategory(_ id: String) -> [Todo] {
+        activeTodos.filter { $0.categoryId == id }
+    }
+
+    private func smartListDetail(for kind: LisdoCategorySmartListKind) -> String {
+        switch kind {
+        case .today:
+            "\(todayCount) due"
+        case .drafts:
+            "\(drafts.count) ready"
+        case .archive:
+            "\(archivedCount) completed"
+        case .trash:
+            "\(trashedCount) deleted"
+        case .attention:
+            "\(failedCount) failed"
+        }
     }
 
     private func canDelete(_ category: Category) -> Bool {
-        !todos.contains { $0.categoryId == category.id }
-            && !drafts.contains { $0.recommendedCategoryId == category.id }
+        !isInboxCategory(category)
     }
 
     private func deleteCategory(_ category: Category) {
         guard canDelete(category) else {
-            categoryMessage = "Delete is disabled while todos or drafts still reference \(category.name). Move or approve those items first."
+            categoryMessage = "Inbox is the fallback category and cannot be deleted."
             return
+        }
+
+        let references = referenceCounts(for: category)
+        guard references.total > 0 else {
+            confirmDeleteCategory(category)
+            return
+        }
+
+        pendingDeleteConfirmation = CategoryDeleteConfirmation(
+            category: category,
+            todoCount: references.todos,
+            draftCount: references.drafts
+        )
+    }
+
+    private func confirmDeleteCategory(_ category: Category) {
+        let fallbackCategoryId = inboxCategoryId
+        let movedTodoCount = todos.filter { $0.categoryId == category.id }.count
+        let movedDraftCount = drafts.filter { $0.recommendedCategoryId == category.id }.count
+
+        for todo in todos where todo.categoryId == category.id {
+            todo.categoryId = fallbackCategoryId
+            todo.updatedAt = Date()
+        }
+
+        for draft in drafts where draft.recommendedCategoryId == category.id {
+            draft.recommendedCategoryId = fallbackCategoryId
         }
 
         modelContext.delete(category)
         do {
             try modelContext.save()
-            categoryMessage = "\(category.name) was deleted."
+            pendingDeleteConfirmation = nil
+            if movedTodoCount > 0 || movedDraftCount > 0 {
+                categoryMessage = "\(category.name) was deleted. \(movedTodoCount) todo\(movedTodoCount == 1 ? "" : "s") and \(movedDraftCount) draft recommendation\(movedDraftCount == 1 ? "" : "s") moved to Inbox."
+            } else {
+                categoryMessage = "\(category.name) was deleted."
+            }
         } catch {
             categoryMessage = "Could not delete \(category.name). Try again after sync finishes."
         }
+    }
+
+    private func isInboxCategory(_ category: Category) -> Bool {
+        category.id == DefaultCategorySeeder.inboxCategoryId
+            || category.name.trimmingCharacters(in: .whitespacesAndNewlines).localizedCaseInsensitiveCompare("Inbox") == .orderedSame
+    }
+
+    private var inboxCategoryId: String {
+        categories.first(where: isInboxCategory)?.id ?? DefaultCategorySeeder.inboxCategoryId
+    }
+
+    private func referenceCounts(for category: Category) -> (todos: Int, drafts: Int, total: Int) {
+        let todoCount = todos.filter { $0.categoryId == category.id }.count
+        let draftCount = drafts.filter { $0.recommendedCategoryId == category.id }.count
+        return (todoCount, draftCount, todoCount + draftCount)
+    }
+
+    private var deleteConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { pendingDeleteConfirmation != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingDeleteConfirmation = nil
+                }
+            }
+        )
     }
 
     private func saveCategory(_ state: CategoryEditorState) {
@@ -208,6 +312,17 @@ struct CategoryEditorState: Identifiable {
     }
 }
 
+private struct CategoryDeleteConfirmation: Identifiable {
+    let id = UUID()
+    var category: Category
+    var todoCount: Int
+    var draftCount: Int
+
+    var message: String {
+        "\(category.name) is used by \(todoCount) todo\(todoCount == 1 ? "" : "s") and \(draftCount) draft recommendation\(draftCount == 1 ? "" : "s"). Deleting it will move those items to Inbox. No todos or drafts will be deleted."
+    }
+}
+
 private struct CategoryEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -268,7 +383,7 @@ private struct CategoryEditorView: View {
                         .disabled(!canDelete)
 
                         if !canDelete {
-                            Text("Delete is disabled while todos or drafts reference this category.")
+                            Text("Inbox is Lisdo's fallback category and cannot be deleted.")
                                 .font(.footnote)
                                 .foregroundStyle(LisdoTheme.ink3)
                         }
@@ -529,13 +644,283 @@ private struct SmartListRow: View {
     }
 }
 
+private struct CategorySmartListDetailView: View {
+    @Environment(\.modelContext) private var modelContext
+
+    var kind: LisdoCategorySmartListKind
+    var todos: [Todo]
+    var drafts: [ProcessingDraft]
+    var captures: [CaptureItem]
+    var categories: [Category]
+    var openDraft: (ProcessingDraft) -> Void
+    var openPomodoro: (Todo) -> Void
+
+    @State private var selectedTodoDetail: CategoryTodoDetailSelection?
+    @State private var message: String?
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                if let message {
+                    ProductStateRow(icon: "checkmark.circle", title: "\(kind.title) update", message: message)
+                }
+
+                content
+            }
+            .padding(16)
+        }
+        .background(LisdoTheme.surface)
+        .navigationTitle(kind.title)
+        .sheet(item: $selectedTodoDetail) { selection in
+            if let todo = todos.first(where: { $0.id == selection.todoID }) {
+                TodoDetailSheet(
+                    todo: todo,
+                    categories: categories,
+                    openPomodoro: openPomodoro
+                )
+                .presentationDetents([.fraction(0.78), .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(LisdoTheme.surface)
+            } else {
+                CategoryMissingTodoDetailView()
+                    .presentationDetents([.medium])
+                    .presentationBackground(LisdoTheme.surface)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch kind {
+        case .today, .archive, .trash:
+            todoList
+        case .drafts:
+            draftList
+        case .attention:
+            attentionList
+        }
+    }
+
+    @ViewBuilder
+    private var todoList: some View {
+        let rows = todosForKind
+
+        if rows.isEmpty {
+            ProductStateRow(icon: kind.systemImage, title: emptyTitle, message: emptyMessage)
+        } else {
+            if kind == .trash {
+                ProductStateRow(
+                    icon: "trash",
+                    title: "30 day retention",
+                    message: "Deleted todos stay in Trash for 30 days, then Lisdo removes them permanently."
+                )
+            }
+
+            ForEach(rows, id: \.id) { todo in
+                CompactTodoCardView(
+                    todo: todo,
+                    categoryName: categoryName(for: todo.categoryId),
+                    onOpen: { selectedTodoDetail = CategoryTodoDetailSelection(todoID: todo.id) },
+                    onStartFocus: kind == .trash ? nil : { openPomodoro(todo) },
+                    onDelete: { deleteAction(for: todo) }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var draftList: some View {
+        if drafts.isEmpty {
+            ProductStateRow(icon: "sparkle", title: "No AI drafts", message: "Reviewable drafts will appear here before they become saved todos.")
+        } else {
+            ForEach(drafts, id: \.id) { draft in
+                DraftCardView(
+                    draft: draft,
+                    categoryName: categoryName(for: draft.recommendedCategoryId),
+                    open: { openDraft(draft) }
+                )
+                .contextMenu {
+                    Button {
+                        saveDraftAsTodo(draft)
+                    } label: {
+                        Label("Save", systemImage: "checkmark")
+                    }
+
+                    Button(role: .destructive) {
+                        deleteDraft(draft)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var attentionList: some View {
+        let failed = captures.filter { $0.status == .failed }
+
+        if failed.isEmpty {
+            ProductStateRow(icon: "exclamationmark.circle", title: "Nothing needs attention", message: "Failed captures will appear here when processing needs review.")
+        } else {
+            ForEach(failed, id: \.id) { capture in
+                PendingCaptureRow(capture: capture)
+            }
+        }
+    }
+
+    private var todosForKind: [Todo] {
+        switch kind {
+        case .today:
+            return activeTodos.filter {
+                Calendar.current.isDateInToday($0.dueDate ?? .distantPast)
+                || Calendar.current.isDateInToday($0.scheduledDate ?? .distantPast)
+                || ($0.dueDateText?.localizedCaseInsensitiveContains("today") == true)
+            }
+        case .archive:
+            return todos.filter { $0.status == .completed || $0.status == .archived }
+        case .trash:
+            return todos.filter { $0.status == .trashed }
+        case .drafts, .attention:
+            return []
+        }
+    }
+
+    private var activeTodos: [Todo] {
+        todos.filter { $0.status == .open || $0.status == .inProgress }
+    }
+
+    private var emptyTitle: String {
+        switch kind {
+        case .today:
+            "Nothing due today"
+        case .archive:
+            "Archive is empty"
+        case .trash:
+            "Trash is empty"
+        case .drafts, .attention:
+            kind.title
+        }
+    }
+
+    private var emptyMessage: String {
+        switch kind {
+        case .today:
+            "Approved active todos due or scheduled today will collect here."
+        case .archive:
+            "Completed todos you archive will collect here."
+        case .trash:
+            "Deleted todos will stay here for 30 days before permanent removal."
+        case .drafts, .attention:
+            ""
+        }
+    }
+
+    private func categoryName(for id: String?) -> String {
+        categories.first(where: { $0.id == id })?.name ?? "General"
+    }
+
+    private func deleteAction(for todo: Todo) {
+        if kind == .trash {
+            modelContext.delete(todo)
+            message = "Todo permanently deleted."
+        } else {
+            TodoTrashPolicy.moveToTrash([todo])
+            message = "Todo moved to Trash."
+            Task { @MainActor in
+                await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
+            }
+        }
+
+        saveChanges()
+    }
+
+    private func deleteDraft(_ draft: ProcessingDraft) {
+        let captureIds = CaptureDeletionPolicy.captureIdsToDelete(whenDeleting: draft, captures: captures)
+        for capture in captures where captureIds.contains(capture.id) {
+            modelContext.delete(capture)
+        }
+        modelContext.delete(draft)
+        message = "Draft deleted."
+        saveChanges()
+    }
+
+    private func saveDraftAsTodo(_ draft: ProcessingDraft) {
+        let categoryId = categoryIdForSaving(draft)
+        draft.recommendedCategoryId = categoryId
+        draft.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.summary = draft.summary?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        draft.blocks = draft.blocks
+            .map { block in
+                var copy = block
+                copy.content = copy.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                return copy
+            }
+            .filter { !$0.content.isEmpty }
+
+        do {
+            let todo = try DraftApprovalConverter.convert(
+                draft,
+                categoryId: categoryId,
+                approval: DraftApproval(approvedByUser: true)
+            )
+            modelContext.insert(todo)
+            if let capture = captures.first(where: { $0.id == draft.captureItemId }) {
+                if capture.status == .processedDraft {
+                    try? capture.transition(to: .approvedTodo)
+                } else {
+                    capture.status = .approvedTodo
+                }
+            }
+            modelContext.delete(draft)
+            try modelContext.save()
+            Task { @MainActor in
+                await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
+            }
+            message = "Saved draft as todo."
+        } catch {
+            message = "Could not save draft: \(error.localizedDescription)"
+        }
+    }
+
+    private func categoryIdForSaving(_ draft: ProcessingDraft) -> String {
+        if let recommendedCategoryId = draft.recommendedCategoryId,
+           categories.contains(where: { $0.id == recommendedCategoryId }) {
+            return recommendedCategoryId
+        }
+
+        return categories.first { $0.id == DefaultCategorySeeder.inboxCategoryId }?.id
+            ?? categories.first?.id
+            ?? DefaultCategorySeeder.inboxCategoryId
+    }
+
+    private func toggleCompletion(_ todo: Todo) {
+        CaptureBatchActions.toggleSavedTodoCompletion(todo)
+        message = todo.status == .completed ? "Completed todo." : "Reopened todo."
+        Task { @MainActor in
+            await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
+        }
+        saveChanges()
+    }
+
+    private func saveChanges() {
+        do {
+            try modelContext.save()
+        } catch {
+            message = "Could not save changes: \(error.localizedDescription)"
+        }
+    }
+}
+
 private struct CategoryDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Category.name) private var allCategories: [Category]
 
     var category: Category
     var todos: [Todo]
     var openPomodoro: (Todo) -> Void
     @State private var todoMessage: String?
+    @State private var selectedTodoDetail: CategoryTodoDetailSelection?
 
     var body: some View {
         ScrollView {
@@ -552,17 +937,11 @@ private struct CategoryDetailView: View {
                     )
                 } else {
                     ForEach(todos, id: \.id) { todo in
-                        TodoCardView(
+                        CompactTodoCardView(
                             todo: todo,
                             categoryName: category.name,
-                            showsActiveTaskControls: true,
-                            liveActivityDisabledText: LisdoPomodoroActivityController.disabledStatusText,
-                            onStart: { openPomodoro(todo) },
-                            onAdvanceStep: { advanceStep(todo) },
-                            onEnd: { endFocus(todo) },
-                            onComplete: { completeTodo(todo) },
-                            onToggleCompletion: { toggleCompletion(todo) },
-                            onToggleBlock: { block in toggleBlock(block, in: todo) },
+                            onOpen: { selectedTodoDetail = CategoryTodoDetailSelection(todoID: todo.id) },
+                            onStartFocus: { openPomodoro(todo) },
                             onDelete: { deleteTodo(todo) }
                         )
                     }
@@ -572,6 +951,22 @@ private struct CategoryDetailView: View {
         }
         .background(LisdoTheme.surface)
         .navigationTitle(category.name)
+        .sheet(item: $selectedTodoDetail) { selection in
+            if let todo = todos.first(where: { $0.id == selection.todoID }) {
+                TodoDetailSheet(
+                    todo: todo,
+                    categories: allCategories,
+                    openPomodoro: openPomodoro
+                )
+                .presentationDetents([.fraction(0.78), .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(LisdoTheme.surface)
+            } else {
+                CategoryMissingTodoDetailView()
+                    .presentationDetents([.medium])
+                    .presentationBackground(LisdoTheme.surface)
+            }
+        }
     }
 
     private func toggleCompletion(_ todo: Todo) {
@@ -661,11 +1056,14 @@ private struct CategoryDetailView: View {
     }
 
     private func deleteTodo(_ todo: Todo) {
-        modelContext.delete(todo)
+        TodoTrashPolicy.moveToTrash([todo])
 
         do {
             try modelContext.save()
-            todoMessage = "Deleted todo."
+            todoMessage = "Todo moved to Trash."
+            Task { @MainActor in
+                await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
+            }
         } catch {
             todoMessage = "Could not delete todo: \(error.localizedDescription)"
         }
@@ -687,5 +1085,39 @@ private extension Array where Element == TodoBlock {
                 }
                 return lhs.id.uuidString < rhs.id.uuidString
             }
+    }
+}
+
+private struct CategoryTodoDetailSelection: Identifiable, Hashable {
+    let todoID: UUID
+    var id: UUID { todoID }
+}
+
+private struct CategoryMissingTodoDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                Image(systemName: "square.grid.2x2.badge.xmark")
+                    .font(.system(size: 30))
+                    .foregroundStyle(LisdoTheme.ink3)
+                Text("Todo unavailable")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(LisdoTheme.ink1)
+                Text("This todo may have been deleted or synced away on another device.")
+                    .font(.callout)
+                    .foregroundStyle(LisdoTheme.ink3)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(LisdoTheme.surface)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }

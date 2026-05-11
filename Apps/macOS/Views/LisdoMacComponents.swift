@@ -1,25 +1,47 @@
+import AppKit
 import LisdoCore
 import SwiftUI
 
 enum LisdoMacTheme {
-    static let surface = LisdoDesign.ColorToken.surface
-    static let surface2 = LisdoDesign.ColorToken.surface2
-    static let surface3 = LisdoDesign.ColorToken.surface3
-    static let divider = LisdoDesign.ColorToken.divider
-    static let ink1 = LisdoDesign.ColorToken.ink1
-    static let ink2 = LisdoDesign.ColorToken.ink2
-    static let ink3 = LisdoDesign.ColorToken.ink3
-    static let ink4 = LisdoDesign.ColorToken.ink4
-    static let ink5 = LisdoDesign.ColorToken.ink5
-    static let ink7 = LisdoDesign.ColorToken.ink7
-    static let ok = LisdoDesign.ColorToken.ok
-    static let warn = LisdoDesign.ColorToken.warn
-    static let info = LisdoDesign.ColorToken.info
-    static let onAccent = LisdoDesign.ColorToken.onAccent
-    static let shopping = LisdoDesign.ColorToken.shopping
-    static let research = LisdoDesign.ColorToken.research
-    static let personal = LisdoDesign.ColorToken.personal
-    static let homeErrands = LisdoDesign.ColorToken.homeErrands
+    static let surface = adaptiveColor(light: 0xF8F5EF, dark: 0x15130F)
+    static let surface2 = adaptiveColor(light: 0xEFE8DD, dark: 0x201C16)
+    static let surface3 = adaptiveColor(light: 0xE4DACD, dark: 0x2A241C)
+    static let divider = adaptiveColor(light: 0xD6CBBB, dark: 0x3D352A)
+    static let ink1 = adaptiveColor(light: 0x28251F, dark: 0xF3EDE4)
+    static let ink2 = adaptiveColor(light: 0x453F36, dark: 0xDDD3C5)
+    static let ink3 = adaptiveColor(light: 0x71695E, dark: 0xB6AA9B)
+    static let ink4 = adaptiveColor(light: 0x9A9080, dark: 0x887D6F)
+    static let ink5 = adaptiveColor(light: 0xC4B9A8, dark: 0x5C5348)
+    static let ink7 = adaptiveColor(light: 0xEDE6DC, dark: 0x302920)
+    static let ok = adaptiveColor(light: 0x637160, dark: 0xA7B69D)
+    static let warn = adaptiveColor(light: 0x9A7A58, dark: 0xD3AE7B)
+    static let info = adaptiveColor(light: 0x6D7880, dark: 0xAAB5BB)
+    static let onAccent = adaptiveColor(light: 0xFFFDF8, dark: 0x15130F)
+    static let shopping = adaptiveColor(light: 0x8A7765, dark: 0xC7B199)
+    static let research = adaptiveColor(light: 0x68735F, dark: 0xAAB699)
+    static let personal = adaptiveColor(light: 0x817286, dark: 0xC3AAC8)
+    static let homeErrands = adaptiveColor(light: 0x9A9080, dark: 0xB7AB9A)
+
+    private static func adaptiveColor(light: UInt32, dark: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            NSColor(lisdoHex: appearance.lisdoUsesDarkColors ? dark : light)
+        })
+    }
+}
+
+private extension NSAppearance {
+    var lisdoUsesDarkColors: Bool {
+        bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+}
+
+private extension NSColor {
+    convenience init(lisdoHex hex: UInt32, alpha: CGFloat = 1) {
+        let red = CGFloat((hex >> 16) & 0xFF) / 255
+        let green = CGFloat((hex >> 8) & 0xFF) / 255
+        let blue = CGFloat(hex & 0xFF) / 255
+        self.init(srgbRed: red, green: green, blue: blue, alpha: alpha)
+    }
 }
 
 enum LisdoMacSelection: Hashable {
@@ -28,6 +50,8 @@ enum LisdoMacSelection: Hashable {
     case today
     case plan
     case fromIPhone
+    case archive
+    case trash
     case category(String)
 }
 
@@ -44,6 +68,10 @@ extension LisdoMacSelection {
             return "Plan"
         case .fromIPhone:
             return "From iPhone"
+        case .archive:
+            return "Archive"
+        case .trash:
+            return "Trash"
         case .category:
             return "Category"
         }

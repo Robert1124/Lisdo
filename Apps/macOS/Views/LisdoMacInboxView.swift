@@ -25,14 +25,15 @@ struct LisdoInboxTriageView: View {
                     HStack(spacing: 8) {
                         LisdoChip(title: "\(drafts.count) drafts", systemImage: "sparkles")
                         LisdoChip(title: "\(pendingCaptures.count) pending", systemImage: "icloud")
+                        LisdoChip(title: "\(savedTodos.count) saved", systemImage: "tray")
                     }
                 }
 
-                if drafts.isEmpty && pendingCaptures.isEmpty && todayTodos.isEmpty {
+                if drafts.isEmpty && pendingCaptures.isEmpty && savedTodos.isEmpty {
                     LisdoEmptyState(
                         systemImage: "tray",
                         title: "Nothing needs review",
-                        message: "Captured text, OCR results, and provider output will appear here as drafts before anything becomes a todo."
+                        message: "Captured text, OCR results, provider output, and saved inbox todos will appear here."
                     )
                 }
 
@@ -41,7 +42,7 @@ struct LisdoInboxTriageView: View {
                         Text("Ready to review")
                             .font(.headline)
                         ForEach(drafts, id: \.id) { draft in
-                            LisdoDraftCard(
+                            LisdoExpandableDraftCard(
                                 draft: draft,
                                 category: categories.category(id: draft.recommendedCategoryId),
                                 capture: captures.first { $0.id == draft.captureItemId },
@@ -105,12 +106,12 @@ struct LisdoInboxTriageView: View {
                     }
                 }
 
-                if !todayTodos.isEmpty {
+                if !savedTodos.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Today and saved")
+                        Text("Saved")
                             .font(.headline)
-                        ForEach(todayTodos, id: \.id) { todo in
-                            LisdoTodoCard(
+                        ForEach(savedTodos, id: \.id) { todo in
+                            LisdoExpandableTodoCard(
                                 todo: todo,
                                 category: categories.category(id: todo.categoryId),
                                 onToggleCompletion: { toggleCompletion(todo) },
@@ -134,7 +135,7 @@ struct LisdoInboxTriageView: View {
         .sheet(isPresented: Binding(get: { editingTodo != nil }, set: { if !$0 { editingTodo = nil } })) {
             if let todo = editingTodo {
                 LisdoMacTodoEditorSheet(todo: todo, categories: categories)
-                    .frame(minWidth: 560, minHeight: 680)
+                    .frame(width: 620, height: 560)
             }
         }
         .alert("Could not save draft", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
@@ -145,11 +146,11 @@ struct LisdoInboxTriageView: View {
     }
 
     private var processableCaptures: [CaptureItem] {
-        CaptureBatchSelector.processablePendingCaptures(from: pendingCaptures)
+        CaptureBatchSelector.processablePendingCaptures(from: LisdoMacMVP2Processing.pendingQueue(from: pendingCaptures))
     }
 
     private var failedCaptures: [CaptureItem] {
-        CaptureBatchSelector.failedCaptures(from: pendingCaptures)
+        CaptureBatchSelector.failedCaptures(from: LisdoMacMVP2Processing.pendingQueue(from: pendingCaptures))
     }
 
     private var pendingCaptures: [CaptureItem] {
@@ -162,17 +163,8 @@ struct LisdoInboxTriageView: View {
         }
     }
 
-    private var todayTodos: [Todo] {
-        let calendar = Calendar.current
-        return todos.filter { todo in
-            if let dueDate = todo.dueDate, calendar.isDateInToday(dueDate) {
-                return true
-            }
-            if let scheduledDate = todo.scheduledDate, calendar.isDateInToday(scheduledDate) {
-                return true
-            }
-            return todo.dueDateText?.localizedCaseInsensitiveContains("today") == true
-        }
+    private var savedTodos: [Todo] {
+        todos.filter { $0.status == .open || $0.status == .inProgress }
     }
 
     private func approveDraft(_ draft: ProcessingDraft) {
@@ -242,7 +234,7 @@ struct LisdoInboxTriageView: View {
             Task { @MainActor in
                 await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
             }
-            queueStatus = todo.status == .completed ? "Completed todo." : "Reopened todo."
+            queueStatus = nil
         } catch {
             errorMessage = "Could not update todo: \(error.localizedDescription)"
         }
@@ -259,7 +251,7 @@ struct LisdoInboxTriageView: View {
 
         do {
             try modelContext.save()
-            queueStatus = block.checked ? "Checklist item completed." : "Checklist item reopened."
+            queueStatus = nil
         } catch {
             errorMessage = "Could not update checklist item: \(error.localizedDescription)"
         }
@@ -267,14 +259,14 @@ struct LisdoInboxTriageView: View {
 
     private func deleteTodo(_ todo: Todo) {
         let reminderIDs = (todo.reminders ?? []).map(\.id)
-        modelContext.delete(todo)
+        TodoTrashPolicy.moveToTrash([todo])
 
         do {
             try modelContext.save()
             Task { await LisdoReminderNotificationScheduler.cancel(reminderIDs: reminderIDs) }
-            queueStatus = "Deleted todo."
+            queueStatus = "Moved todo to Trash."
         } catch {
-            errorMessage = "Could not delete todo: \(error.localizedDescription)"
+            errorMessage = "Could not move todo to Trash: \(error.localizedDescription)"
         }
     }
 
@@ -332,6 +324,97 @@ struct LisdoInboxTriageView: View {
             await process(capture)
         }
         _ = task
+    }
+}
+
+struct LisdoExpandableDraftCard: View {
+    let draft: ProcessingDraft
+    let category: Category?
+    let capture: CaptureItem?
+    var onSave: (() -> Void)?
+    var onEdit: (() -> Void)?
+    var onRevise: (() -> Void)?
+    var onDelete: (() -> Void)?
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        if isExpanded {
+            LisdoDraftCard(
+                draft: draft,
+                category: category,
+                capture: capture,
+                onSave: onSave,
+                onEdit: onEdit,
+                onRevise: onRevise,
+                onDelete: onDelete
+            )
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        } else {
+            LisdoCompactDraftRow(
+                draft: draft,
+                category: category,
+                capture: capture,
+                onSave: onSave,
+                onDelete: onDelete,
+                onOpen: {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        isExpanded = true
+                    }
+                }
+            )
+        }
+    }
+}
+
+private struct LisdoCompactDraftRow: View {
+    let draft: ProcessingDraft
+    let category: Category?
+    let capture: CaptureItem?
+    var onSave: (() -> Void)?
+    var onDelete: (() -> Void)?
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 10) {
+                LisdoCategoryDot(category: category)
+                Text(draft.title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer()
+                LisdoChip(title: "Draft", systemImage: "sparkles")
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(LisdoMacTheme.ink7, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                    .foregroundStyle(LisdoMacTheme.ink4.opacity(0.48))
+            }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if let onSave {
+                Button {
+                    onSave()
+                } label: {
+                    Label("Save Draft", systemImage: "checkmark")
+                }
+            }
+            if let onDelete {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete Draft", systemImage: "trash")
+                }
+            }
+        }
     }
 }
 
@@ -665,6 +748,157 @@ struct LisdoPendingCaptureRow: View {
     }
 }
 
+struct LisdoExpandableTodoCard: View {
+    let todo: Todo
+    let category: Category?
+    var onToggleCompletion: (() -> Void)?
+    var onToggleBlock: ((TodoBlock) -> Void)?
+    var onEdit: (() -> Void)?
+    var onDelete: (() -> Void)?
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        if isExpanded {
+            LisdoTodoCard(
+                todo: todo,
+                category: category,
+                onToggleCompletion: onToggleCompletion,
+                onToggleBlock: onToggleBlock,
+                onEdit: onEdit,
+                onDelete: onDelete,
+                onCollapse: {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        isExpanded = false
+                    }
+                }
+            )
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        } else {
+            LisdoCompactTodoRow(
+                todo: todo,
+                category: category,
+                onOpen: {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        isExpanded = true
+                    }
+                },
+                onToggleCompletion: onToggleCompletion,
+                onEdit: onEdit,
+                onDelete: onDelete
+            )
+        }
+    }
+}
+
+private struct LisdoCompactTodoRow: View {
+    let todo: Todo
+    let category: Category?
+    let onOpen: () -> Void
+    var onToggleCompletion: (() -> Void)?
+    var onEdit: (() -> Void)?
+    var onDelete: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                onToggleCompletion?()
+            } label: {
+                Image(systemName: todo.status == .completed ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(todo.status == .completed ? .secondary : .primary)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .disabled(onToggleCompletion == nil)
+            .accessibilityLabel(todo.status == .completed ? "Reopen todo" : "Complete todo")
+
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        LisdoCategoryDot(category: category)
+                        Text(category?.name ?? "Inbox")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                        if let dateLabel {
+                            Text("· \(dateLabel)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Text(todo.title)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    if let summary = todo.summary?.lisdoTrimmed, !summary.isEmpty {
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 10)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 4)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onOpen()
+            }
+        }
+        .padding(14)
+        .background(LisdoMacTheme.surface2, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(LisdoMacTheme.divider.opacity(0.72))
+        }
+        .contextMenu {
+            if let onToggleCompletion {
+                Button {
+                    onToggleCompletion()
+                } label: {
+                    Label(todo.status == .completed ? "Reopen Todo" : "Complete Todo", systemImage: todo.status == .completed ? "circle" : "checkmark.circle")
+                }
+            }
+            if let onEdit {
+                Button {
+                    onEdit()
+                } label: {
+                    Label("Edit Todo", systemImage: "pencil")
+                }
+            }
+            if let onDelete {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete Todo", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    private var dateLabel: String? {
+        if let scheduledDate = todo.scheduledDate {
+            return "Scheduled \(scheduledDate.formatted(.dateTime.month(.abbreviated).day().hour().minute()))"
+        }
+        if let dueDate = todo.dueDate {
+            return "Due \(dueDate.formatted(.dateTime.month(.abbreviated).day().hour().minute()))"
+        }
+        if let dueDateText = todo.dueDateText?.lisdoTrimmed, !dueDateText.isEmpty {
+            return "Due \(dueDateText)"
+        }
+        return nil
+    }
+}
+
 struct LisdoTodoCard: View {
     let todo: Todo
     let category: Category?
@@ -672,6 +906,7 @@ struct LisdoTodoCard: View {
     var onToggleBlock: ((TodoBlock) -> Void)?
     var onEdit: (() -> Void)?
     var onDelete: (() -> Void)?
+    var onCollapse: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -718,29 +953,35 @@ struct LisdoTodoCard: View {
                 let blocks = todo.blocks ?? []
                 if !blocks.isEmpty {
                     LisdoMacTodoBlockList(blocks: blocks.sortedForMacTodoDisplay(), onToggleBlock: onToggleBlock)
-                    .padding(.top, 2)
+                        .padding(.top, 2)
                 }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onCollapse?()
             }
             Spacer()
-            if let onEdit {
-                Button {
-                    onEdit()
-                } label: {
-                    Image(systemName: "pencil")
+
+            if onEdit != nil || onDelete != nil {
+                HStack(alignment: .center, spacing: 4) {
+                    if let onEdit {
+                        LisdoMacIconActionButton(
+                            systemName: "pencil",
+                            accessibilityLabel: "Edit todo",
+                            action: onEdit
+                        )
+                    }
+
+                    if let onDelete {
+                        LisdoMacIconActionButton(
+                            systemName: "trash",
+                            accessibilityLabel: "Delete todo",
+                            role: .destructive,
+                            action: onDelete
+                        )
+                    }
                 }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Edit todo")
-            }
-            if let onDelete {
-                Button(role: .destructive) {
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Delete todo")
+                .frame(height: 28, alignment: .center)
             }
         }
         .padding(16)
@@ -774,6 +1015,28 @@ struct LisdoTodoCard: View {
                 }
             }
         }
+    }
+}
+
+private struct LisdoMacIconActionButton: View {
+    let systemName: String
+    let accessibilityLabel: String
+    var role: ButtonRole?
+    let action: () -> Void
+
+    var body: some View {
+        Button(role: role) {
+            action()
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .regular))
+                .imageScale(.medium)
+                .frame(width: 28, height: 28, alignment: .center)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -941,7 +1204,7 @@ struct LisdoTodayView: View {
         .sheet(isPresented: Binding(get: { editingTodo != nil }, set: { if !$0 { editingTodo = nil } })) {
             if let todo = editingTodo {
                 LisdoMacTodoEditorSheet(todo: todo, categories: categories)
-                    .frame(minWidth: 560, minHeight: 680)
+                    .frame(width: 620, height: 560)
             }
         }
     }
@@ -954,7 +1217,7 @@ struct LisdoTodayView: View {
             Task { @MainActor in
                 await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
             }
-            todoStatus = todo.status == .completed ? "Completed todo." : "Reopened todo."
+            todoStatus = nil
         } catch {
             todoStatus = "Could not update todo: \(error.localizedDescription)"
         }
@@ -971,7 +1234,7 @@ struct LisdoTodayView: View {
 
         do {
             try modelContext.save()
-            todoStatus = block.checked ? "Checklist item completed." : "Checklist item reopened."
+            todoStatus = nil
         } catch {
             todoStatus = "Could not update checklist item: \(error.localizedDescription)"
         }
@@ -979,14 +1242,147 @@ struct LisdoTodayView: View {
 
     private func deleteTodo(_ todo: Todo) {
         let reminderIDs = (todo.reminders ?? []).map(\.id)
-        modelContext.delete(todo)
+        TodoTrashPolicy.moveToTrash([todo])
 
         do {
             try modelContext.save()
             Task { await LisdoReminderNotificationScheduler.cancel(reminderIDs: reminderIDs) }
-            todoStatus = "Deleted todo."
+            todoStatus = "Moved todo to Trash."
         } catch {
-            todoStatus = "Could not delete todo: \(error.localizedDescription)"
+            todoStatus = "Could not move todo to Trash: \(error.localizedDescription)"
+        }
+    }
+}
+
+struct LisdoMacTodoCollectionView: View {
+    @Environment(\.modelContext) private var modelContext
+
+    let title: String
+    let subtitle: String
+    let emptySystemImage: String
+    let emptyTitle: String
+    let emptyMessage: String
+    let todos: [Todo]
+    let categories: [Category]
+    let focusedTodoId: UUID?
+    var allowsCompletionToggle = true
+    var allowsDelete = true
+
+    @State private var todoStatus: String?
+    @State private var editingTodo: Todo?
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    LisdoSectionHeader(title, subtitle: subtitle)
+
+                    if let todoStatus {
+                        Text(todoStatus)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(LisdoMacTheme.surface2, in: RoundedRectangle(cornerRadius: 12))
+                    }
+
+                    if todos.isEmpty {
+                        LisdoEmptyState(
+                            systemImage: emptySystemImage,
+                            title: emptyTitle,
+                            message: emptyMessage
+                        )
+                    } else {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(todos, id: \.id) { todo in
+                                LisdoExpandableTodoCard(
+                                    todo: todo,
+                                    category: categories.category(id: todo.categoryId),
+                                    onToggleCompletion: allowsCompletionToggle ? { toggleCompletion(todo) } : nil,
+                                    onToggleBlock: allowsCompletionToggle ? { block in toggleBlock(block, in: todo) } : nil,
+                                    onEdit: { editingTodo = todo },
+                                    onDelete: allowsDelete ? { moveTodoToTrash(todo) } : nil
+                                )
+                                .id(todo.id)
+                            }
+                        }
+                    }
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onAppear {
+                scrollToFocusedTodo(with: proxy)
+            }
+            .onChange(of: focusedTodoId) { _, _ in
+                scrollToFocusedTodo(with: proxy)
+            }
+        }
+        .background(LisdoMacTheme.surface)
+        .sheet(isPresented: Binding(get: { editingTodo != nil }, set: { if !$0 { editingTodo = nil } })) {
+            if let todo = editingTodo {
+                LisdoMacTodoEditorSheet(todo: todo, categories: categories)
+                    .frame(width: 620, height: 560)
+            }
+        }
+    }
+
+    private func scrollToFocusedTodo(with proxy: ScrollViewProxy) {
+        guard let focusedTodoId,
+              todos.contains(where: { $0.id == focusedTodoId })
+        else {
+            return
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            withAnimation(.snappy(duration: 0.24)) {
+                proxy.scrollTo(focusedTodoId, anchor: .center)
+            }
+        }
+    }
+
+    private func toggleCompletion(_ todo: Todo) {
+        CaptureBatchActions.toggleSavedTodoCompletion(todo)
+
+        do {
+            try modelContext.save()
+            Task { @MainActor in
+                await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
+            }
+            todoStatus = nil
+        } catch {
+            todoStatus = "Could not update todo: \(error.localizedDescription)"
+        }
+    }
+
+    private func toggleBlock(_ block: TodoBlock, in todo: Todo) {
+        guard block.type == .checkbox else { return }
+
+        block.checked.toggle()
+        if todo.status == .completed && !block.checked {
+            todo.status = .open
+        }
+        todo.updatedAt = Date()
+
+        do {
+            try modelContext.save()
+            todoStatus = nil
+        } catch {
+            todoStatus = "Could not update checklist item: \(error.localizedDescription)"
+        }
+    }
+
+    private func moveTodoToTrash(_ todo: Todo) {
+        let reminderIDs = (todo.reminders ?? []).map(\.id)
+        TodoTrashPolicy.moveToTrash([todo])
+
+        do {
+            try modelContext.save()
+            Task { await LisdoReminderNotificationScheduler.cancel(reminderIDs: reminderIDs) }
+            todoStatus = "Moved todo to Trash."
+        } catch {
+            todoStatus = "Could not move todo to Trash: \(error.localizedDescription)"
         }
     }
 }
@@ -1021,29 +1417,6 @@ struct LisdoCategoryDetailView: View {
                         }
                     }
 
-                    if let category, (!category.formattingInstruction.isEmpty || category.schemaPreset != .general) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 8) {
-                                LisdoChip(title: category.schemaPreset.rawValue, systemImage: "curlybraces")
-                                if let icon = category.icon {
-                                    LisdoChip(title: icon, systemImage: icon)
-                                }
-                            }
-                            if !category.formattingInstruction.isEmpty {
-                                Text(category.formattingInstruction)
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(LisdoMacTheme.surface2, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(LisdoMacTheme.divider.opacity(0.72))
-                        }
-                    }
-
                     if let todoStatus {
                         Text(todoStatus)
                             .font(.callout)
@@ -1066,7 +1439,7 @@ struct LisdoCategoryDetailView: View {
                             Text("Suggested drafts")
                                 .font(.headline)
                             ForEach(drafts, id: \.id) { draft in
-                                LisdoDraftCard(
+                                LisdoExpandableDraftCard(
                                     draft: draft,
                                     category: category,
                                     capture: nil,
@@ -1083,7 +1456,7 @@ struct LisdoCategoryDetailView: View {
                             Text("Saved")
                                 .font(.headline)
                             ForEach(todos, id: \.id) { todo in
-                                LisdoTodoCard(
+                                LisdoExpandableTodoCard(
                                     todo: todo,
                                     category: categories.category(id: todo.categoryId),
                                     onToggleCompletion: { toggleCompletion(todo) },
@@ -1114,7 +1487,7 @@ struct LisdoCategoryDetailView: View {
         .sheet(isPresented: Binding(get: { editingTodo != nil }, set: { if !$0 { editingTodo = nil } })) {
             if let todo = editingTodo {
                 LisdoMacTodoEditorSheet(todo: todo, categories: categories)
-                    .frame(minWidth: 560, minHeight: 680)
+                    .frame(width: 620, height: 560)
             }
         }
     }
@@ -1142,7 +1515,7 @@ struct LisdoCategoryDetailView: View {
             Task { @MainActor in
                 await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
             }
-            todoStatus = todo.status == .completed ? "Completed todo." : "Reopened todo."
+            todoStatus = nil
         } catch {
             todoStatus = "Could not update todo: \(error.localizedDescription)"
         }
@@ -1159,7 +1532,7 @@ struct LisdoCategoryDetailView: View {
 
         do {
             try modelContext.save()
-            todoStatus = block.checked ? "Checklist item completed." : "Checklist item reopened."
+            todoStatus = nil
         } catch {
             todoStatus = "Could not update checklist item: \(error.localizedDescription)"
         }
@@ -1167,14 +1540,14 @@ struct LisdoCategoryDetailView: View {
 
     private func deleteTodo(_ todo: Todo) {
         let reminderIDs = (todo.reminders ?? []).map(\.id)
-        modelContext.delete(todo)
+        TodoTrashPolicy.moveToTrash([todo])
 
         do {
             try modelContext.save()
             Task { await LisdoReminderNotificationScheduler.cancel(reminderIDs: reminderIDs) }
-            todoStatus = "Deleted todo."
+            todoStatus = "Moved todo to Trash."
         } catch {
-            todoStatus = "Could not delete todo: \(error.localizedDescription)"
+            todoStatus = "Could not move todo to Trash: \(error.localizedDescription)"
         }
     }
 }
@@ -1182,6 +1555,8 @@ struct LisdoCategoryDetailView: View {
 struct LisdoMacCategoryEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Todo.updatedAt, order: .reverse) private var todos: [Todo]
+    @Query(sort: \ProcessingDraft.generatedAt, order: .reverse) private var drafts: [ProcessingDraft]
 
     let category: Category?
 
@@ -1192,6 +1567,7 @@ struct LisdoMacCategoryEditorSheet: View {
     @State private var icon: String
     @State private var usesCustomIcon: Bool
     @State private var errorMessage: String?
+    @State private var showsDeleteConfirmation = false
 
     init(category: Category?) {
         self.category = category
@@ -1275,6 +1651,14 @@ struct LisdoMacCategoryEditorSheet: View {
             Divider()
 
             HStack {
+                if category != nil {
+                    Button("Delete Category", role: .destructive) {
+                        requestDelete()
+                    }
+                    .disabled(isInboxFallbackCategory)
+                    .help(isInboxFallbackCategory ? "Inbox is the fallback category and cannot be deleted." : "Delete this category")
+                }
+
                 Spacer()
                 Button("Save Category") {
                     save()
@@ -1283,6 +1667,18 @@ struct LisdoMacCategoryEditorSheet: View {
                 .disabled(name.lisdoTrimmed.isEmpty)
             }
             .padding(18)
+        }
+        .confirmationDialog(
+            "Delete category?",
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Move Items to Inbox and Delete", role: .destructive) {
+                deleteCategory()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(deleteConfirmationMessage)
         }
     }
 
@@ -1350,6 +1746,28 @@ struct LisdoMacCategoryEditorSheet: View {
         return Self.isValidSystemSymbol(trimmed) ? nil : "This SF Symbol name is not available on this system."
     }
 
+    private var isInboxFallbackCategory: Bool {
+        category?.id == DefaultCategorySeeder.inboxCategoryId
+    }
+
+    private var referencedTodos: [Todo] {
+        guard let category else { return [] }
+        return todos.filter { $0.categoryId == category.id }
+    }
+
+    private var referencedDrafts: [ProcessingDraft] {
+        guard let category else { return [] }
+        return drafts.filter { $0.recommendedCategoryId == category.id }
+    }
+
+    private var referencedItemCount: Int {
+        referencedTodos.count + referencedDrafts.count
+    }
+
+    private var deleteConfirmationMessage: String {
+        "This category is used by \(referencedTodos.count) todos and \(referencedDrafts.count) drafts. They will be moved to Inbox before the category is deleted."
+    }
+
     private func save() {
         do {
             guard iconValidationError == nil else {
@@ -1378,6 +1796,48 @@ struct LisdoMacCategoryEditorSheet: View {
             dismiss()
         } catch {
             errorMessage = "Could not save category: \(error.localizedDescription)"
+        }
+    }
+
+    private func requestDelete() {
+        guard category != nil else { return }
+        guard !isInboxFallbackCategory else {
+            errorMessage = "Inbox is the fallback category and cannot be deleted."
+            return
+        }
+
+        if referencedItemCount > 0 {
+            showsDeleteConfirmation = true
+        } else {
+            deleteCategory()
+        }
+    }
+
+    private func deleteCategory() {
+        guard let category else { return }
+        guard !isInboxFallbackCategory else {
+            errorMessage = "Inbox is the fallback category and cannot be deleted."
+            return
+        }
+
+        do {
+            let inboxCategoryId = DefaultCategorySeeder.inboxCategoryId
+            let now = Date()
+
+            for todo in referencedTodos {
+                todo.categoryId = inboxCategoryId
+                todo.updatedAt = now
+            }
+
+            for draft in referencedDrafts {
+                draft.recommendedCategoryId = inboxCategoryId
+            }
+
+            modelContext.delete(category)
+            try modelContext.save()
+            dismiss()
+        } catch {
+            errorMessage = "Could not delete category: \(error.localizedDescription)"
         }
     }
 
@@ -1929,7 +2389,7 @@ struct LisdoPlanView: View {
         .sheet(isPresented: Binding(get: { editingTodo != nil }, set: { if !$0 { editingTodo = nil } })) {
             if let todo = editingTodo {
                 LisdoMacTodoEditorSheet(todo: todo, categories: categories)
-                    .frame(minWidth: 560, minHeight: 680)
+                    .frame(width: 620, height: 560)
             }
         }
     }
@@ -2193,7 +2653,7 @@ struct LisdoPlanView: View {
             Task { @MainActor in
                 await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
             }
-            planStatus = todo.status == .completed ? "Completed todo." : "Reopened todo."
+            planStatus = nil
         } catch {
             planStatus = "Could not update todo: \(error.localizedDescription)"
         }
@@ -2201,14 +2661,14 @@ struct LisdoPlanView: View {
 
     private func deleteTodo(_ todo: Todo) {
         let reminderIDs = (todo.reminders ?? []).map(\.id)
-        modelContext.delete(todo)
+        TodoTrashPolicy.moveToTrash([todo])
 
         do {
             try modelContext.save()
             Task { await LisdoReminderNotificationScheduler.cancel(reminderIDs: reminderIDs) }
-            planStatus = "Deleted todo."
+            planStatus = "Moved todo to Trash."
         } catch {
-            planStatus = "Could not delete todo: \(error.localizedDescription)"
+            planStatus = "Could not move todo to Trash: \(error.localizedDescription)"
         }
     }
 
@@ -2846,26 +3306,26 @@ private struct LisdoPlanTodoRow: View {
 
             Spacer(minLength: 0)
 
-            if let onEdit {
-                Button {
-                    onEdit()
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Edit todo")
-            }
+            if onEdit != nil || onDelete != nil {
+                HStack(alignment: .center, spacing: 4) {
+                    if let onEdit {
+                        LisdoMacIconActionButton(
+                            systemName: "pencil",
+                            accessibilityLabel: "Edit todo",
+                            action: onEdit
+                        )
+                    }
 
-            if let onDelete {
-                Button(role: .destructive) {
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash")
+                    if let onDelete {
+                        LisdoMacIconActionButton(
+                            systemName: "trash",
+                            accessibilityLabel: "Delete todo",
+                            role: .destructive,
+                            action: onDelete
+                        )
+                    }
                 }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Delete todo")
+                .frame(height: 28, alignment: .center)
             }
         }
         .padding(14)
@@ -3000,6 +3460,8 @@ private extension TodoStatus {
             return 2
         case .archived:
             return 3
+        case .trashed:
+            return 4
         }
     }
 }

@@ -15,7 +15,7 @@ struct LisdoMacRootView: View {
     @State private var searchText = ""
     @State private var isSearchExpanded = false
     @State private var isApplyingDeferredColumnVisibility = false
-    @State private var showsCapture = false
+    @State private var captureRequest: LisdoMacCaptureRequest?
     @State private var showsNewCategory = false
     @State private var showsFilterPopover = false
     @State private var searchFilters = LisdoMacSearchFilters()
@@ -55,7 +55,7 @@ struct LisdoMacRootView: View {
                 filters: $searchFilters,
                 categories: categories,
                 onCapture: {
-                    showsCapture = true
+                    captureRequest = LisdoMacCaptureRequest(initialAction: .text)
                 }
             )
         }
@@ -66,13 +66,43 @@ struct LisdoMacRootView: View {
             )
         }
         .onAppear(perform: bootstrapDefaultCategories)
+        .onChange(of: categorySyncSignature) { _, _ in
+            bootstrapDefaultCategories()
+        }
         .onReceive(NotificationCenter.default.publisher(for: LisdoMacNotifications.openCapture)) { _ in
-            showsCapture = true
+            captureRequest = LisdoMacCaptureRequest(initialAction: .text)
             NSApp.activate(ignoringOtherApps: true)
         }
-        .sheet(isPresented: $showsCapture) {
-            LisdoCaptureSheet(categories: categories)
-                .frame(minWidth: 560, minHeight: 520)
+        .onReceive(NotificationCenter.default.publisher(for: LisdoMacNotifications.selectScreenArea)) { _ in
+            captureRequest = LisdoMacCaptureRequest(initialAction: .selectedArea)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: LisdoMacNotifications.openFromIPhone)) { _ in
+            selection = .fromIPhone
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: LisdoMacNotifications.openTodo)) { notification in
+            guard let todoId = notification.userInfo?[LisdoMacNotifications.todoIdUserInfoKey] as? UUID,
+                  let todo = todos.first(where: { $0.id == todoId })
+            else {
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
+
+            focusedTodoId = todo.id
+            switch todo.status {
+            case .trashed:
+                selection = .trash
+            case .archived, .completed:
+                selection = .archive
+            default:
+                selection = .category(todo.categoryId)
+            }
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .sheet(item: $captureRequest) { request in
+            LisdoCaptureSheet(categories: categories, initialAction: request.initialAction)
+                .frame(minWidth: 520, minHeight: 420)
         }
         .sheet(isPresented: $showsNewCategory) {
             LisdoMacCategoryEditorSheet(category: nil)
@@ -107,7 +137,7 @@ struct LisdoMacRootView: View {
             query: AdvancedSearchQuery(
                 text: searchText.lisdoTrimmed.isEmpty ? nil : searchText.lisdoTrimmed,
                 captureStatuses: searchFilters.captureStatus.map { [$0] } ?? [],
-                providerModes: searchFilters.providerMode.map { [$0] } ?? [],
+                providerModes: [],
                 categoryIds: searchFilters.categoryId.map { [$0] } ?? [],
                 todoStatuses: searchFilters.todoStatus.map { [$0] } ?? [],
                 priorities: searchFilters.priority.map { [$0] } ?? []
@@ -140,6 +170,9 @@ struct LisdoMacRootView: View {
     private var todayTodos: [Todo] {
         let calendar = Calendar.current
         return filteredTodos.filter { todo in
+            guard todo.status == .open || todo.status == .inProgress else {
+                return false
+            }
             if let dueDate = todo.dueDate, calendar.isDateInToday(dueDate) {
                 return true
             }
@@ -150,14 +183,18 @@ struct LisdoMacRootView: View {
         }
     }
 
+    private var activeTodos: [Todo] {
+        filteredTodos.filter { $0.status == .open || $0.status == .inProgress }
+    }
+
     private var fromIPhoneCaptures: [CaptureItem] {
-        filteredCaptures.filter { capture in
-            capture.createdDevice == .iPhone
-            || capture.preferredProviderMode == .macOnlyCLI
-            || capture.status == .pendingProcessing
-            || capture.status == .processing
-            || capture.status == .retryPending
-        }
+        LisdoMacMVP2Processing.pendingQueue(from: filteredCaptures)
+    }
+
+    private var categorySyncSignature: String {
+        categories
+            .map { "\($0.id)|\($0.name)" }
+            .joined(separator: "\u{001F}")
     }
 
     private func bootstrapDefaultCategories() {
@@ -189,7 +226,7 @@ private struct LisdoMacDetailHost: View {
         case .inbox:
             LisdoInboxTriageView(
                 title: "Inbox",
-                subtitle: "Review drafts, pending captures, and today's saved todos.",
+                subtitle: "Review drafts, pending captures, and saved todos.",
                 drafts: drafts,
                 captures: captures,
                 todos: todos,
@@ -217,15 +254,49 @@ private struct LisdoMacDetailHost: View {
             )
         case .fromIPhone:
             LisdoFromIPhoneView(captures: fromIPhoneCaptures, categories: categories)
+        case .archive:
+            LisdoMacTodoCollectionView(
+                title: "Archive",
+                subtitle: "Completed and archived Lisdo todos.",
+                emptySystemImage: "archivebox",
+                emptyTitle: "Archive is empty",
+                emptyMessage: "Completed todos can be archived here when they no longer need active attention.",
+                todos: archiveTodos,
+                categories: categories,
+                focusedTodoId: focusedTodoId,
+                allowsCompletionToggle: true,
+                allowsDelete: true
+            )
+        case .trash:
+            LisdoMacTodoCollectionView(
+                title: "Trash",
+                subtitle: "Deleted todos stay here for 30 days before cleanup.",
+                emptySystemImage: "trash",
+                emptyTitle: "Trash is empty",
+                emptyMessage: "Deleted todos will collect here temporarily.",
+                todos: trashTodos,
+                categories: categories,
+                focusedTodoId: focusedTodoId,
+                allowsCompletionToggle: false,
+                allowsDelete: false
+            )
         case .category(let categoryId):
             LisdoCategoryDetailView(
                 category: categories.category(id: categoryId),
-                todos: todos.inCategory(categoryId),
+                todos: todos.filter { ($0.status == .open || $0.status == .inProgress) && $0.categoryId == categoryId },
                 drafts: drafts.filter { $0.recommendedCategoryId == categoryId },
                 categories: categories,
                 focusedTodoId: focusedTodoId
             )
         }
+    }
+
+    private var archiveTodos: [Todo] {
+        todos.filter { $0.status == .completed || $0.status == .archived }
+    }
+
+    private var trashTodos: [Todo] {
+        todos.filter { $0.status == .trashed }
     }
 }
 
@@ -287,14 +358,12 @@ private struct LisdoMacToolbarContent: ToolbarContent {
 
 private struct LisdoMacSearchFilters: Equatable {
     var captureStatus: CaptureStatus?
-    var providerMode: ProviderMode?
     var categoryId: String?
     var todoStatus: TodoStatus?
     var priority: TodoPriority?
 
     var hasActiveFilters: Bool {
         captureStatus != nil
-            || providerMode != nil
             || categoryId != nil
             || todoStatus != nil
             || priority != nil
@@ -302,7 +371,6 @@ private struct LisdoMacSearchFilters: Equatable {
 
     mutating func clear() {
         captureStatus = nil
-        providerMode = nil
         categoryId = nil
         todoStatus = nil
         priority = nil
@@ -330,13 +398,6 @@ private struct LisdoMacFilterPopover: View {
                 selection: $filters.captureStatus,
                 values: CaptureStatus.allCases,
                 label: { readableEnumLabel($0.rawValue) }
-            )
-
-            filterMenu(
-                title: "Provider",
-                selection: $filters.providerMode,
-                values: DraftProviderFactory.supportedModes,
-                label: { DraftProviderFactory.metadata(for: $0).displayName }
             )
 
             filterMenu(

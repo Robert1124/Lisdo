@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss
+  version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/"
+>
+  <channel>
+    <title>Lisdo Mac Updates</title>
+    <link>https://lisdo.robertw.me/updates.html</link>
+    <description>Sparkle appcast for Lisdo Mac. No release is advertised until a signed artifact is available.</description>
+    <language>en</language>
+    <generator>Lisdo static website</generator>
+    <docs>https://sparkle-project.org/appcast.html</docs>
+    <dc:creator>Lisdo</dc:creator>
+    <sparkle:appcastVersion>2</sparkle:appcastVersion>
+    <!--
+      Maintain this as an empty-safe appcast until a signed .zip/.dmg exists.
+      Add release items only with a real enclosure URL, sparkle:version,
+      sparkle:shortVersionString, length, type, and Sparkle signature metadata.
+    -->
+  </channel>
+</rss>

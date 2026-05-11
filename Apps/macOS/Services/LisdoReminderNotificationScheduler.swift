@@ -5,7 +5,7 @@ import UserNotifications
 @MainActor
 enum LisdoReminderNotificationScheduler {
     static func syncNotifications(for todo: Todo) async {
-        guard todo.status != .completed && todo.status != .archived else {
+        guard todo.status != .completed && todo.status != .archived && todo.status != .trashed else {
             await cancel(reminderIDs: (todo.reminders ?? []).map(\.id))
             return
         }

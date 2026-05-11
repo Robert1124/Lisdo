@@ -38,6 +38,7 @@ struct LisdoRootView: View {
                     todos: todos,
                     drafts: drafts,
                     captures: captures,
+                    openDraft: { activeSheet = .draft($0.id) },
                     openPomodoro: startPomodoro
                 )
             }
@@ -62,7 +63,13 @@ struct LisdoRootView: View {
         }
         .tint(LisdoTheme.ink1)
         .background(LisdoTheme.surface)
-        .onAppear(perform: seedDefaultCategoriesIfNeeded)
+        .onAppear {
+            seedDefaultCategoriesIfNeeded()
+            purgeExpiredTrashedTodos()
+        }
+        .onChange(of: categorySyncSignature) { _, _ in
+            seedDefaultCategoriesIfNeeded()
+        }
         .onChange(of: selectedTab) { _, nextTab in
             if nextTab == .capture {
                 activeSheet = .capture
@@ -115,9 +122,24 @@ struct LisdoRootView: View {
         ?? "Source capture is no longer available on this device."
     }
 
+    private var categorySyncSignature: String {
+        categories
+            .map { "\($0.id)|\($0.name)" }
+            .joined(separator: "\u{001F}")
+    }
+
     private func seedDefaultCategoriesIfNeeded() {
-        guard categories.isEmpty else { return }
         _ = try? DefaultCategorySeeder.seedDefaults(in: modelContext)
+    }
+
+    private func purgeExpiredTrashedTodos() {
+        let expired = TodoTrashPolicy.expiredTrashedTodos(todos)
+        guard !expired.isEmpty else { return }
+
+        for todo in expired {
+            modelContext.delete(todo)
+        }
+        try? modelContext.save()
     }
 
     private func startPomodoro(_ todo: Todo) {

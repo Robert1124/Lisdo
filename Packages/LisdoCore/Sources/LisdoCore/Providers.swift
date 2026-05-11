@@ -10,6 +10,8 @@ public struct TaskDraftInput: Equatable, Sendable {
     public var timeZoneIdentifier: String?
     public var imageAttachment: TaskDraftImageAttachment?
     public var audioAttachment: TaskDraftAudioAttachment?
+    public var additionalImageAttachments: [TaskDraftImageAttachment]
+    public var additionalAudioAttachments: [TaskDraftAudioAttachment]
 
     public init(
         captureItemId: UUID,
@@ -20,7 +22,9 @@ public struct TaskDraftInput: Equatable, Sendable {
         captureCreatedAt: Date? = nil,
         timeZoneIdentifier: String? = nil,
         imageAttachment: TaskDraftImageAttachment? = nil,
-        audioAttachment: TaskDraftAudioAttachment? = nil
+        audioAttachment: TaskDraftAudioAttachment? = nil,
+        additionalImageAttachments: [TaskDraftImageAttachment] = [],
+        additionalAudioAttachments: [TaskDraftAudioAttachment] = []
     ) {
         self.captureItemId = captureItemId
         self.sourceText = sourceText
@@ -31,6 +35,16 @@ public struct TaskDraftInput: Equatable, Sendable {
         self.timeZoneIdentifier = timeZoneIdentifier
         self.imageAttachment = imageAttachment
         self.audioAttachment = audioAttachment
+        self.additionalImageAttachments = additionalImageAttachments
+        self.additionalAudioAttachments = additionalAudioAttachments
+    }
+
+    public var allImageAttachments: [TaskDraftImageAttachment] {
+        [imageAttachment].compactMap { $0 } + additionalImageAttachments
+    }
+
+    public var allAudioAttachments: [TaskDraftAudioAttachment] {
+        [audioAttachment].compactMap { $0 } + additionalAudioAttachments
     }
 }
 
@@ -500,12 +514,12 @@ private enum TaskDraftPromptBuilder {
         let prompt = userPrompt(input: input, categories: categories)
         var parts: [OpenAICompatibleContentPart] = [.text(prompt)]
 
-        if let imageAttachment = input.imageAttachment {
+        for imageAttachment in input.allImageAttachments {
             let dataURL = "data:\(imageAttachment.mimeType);base64,\(imageAttachment.data.base64EncodedString())"
             parts.append(.imageURL(dataURL))
         }
 
-        if let audioAttachment = input.audioAttachment {
+        for audioAttachment in input.allAudioAttachments {
             parts.append(.inputAudio(data: audioAttachment.data.base64EncodedString(), format: audioAttachment.format))
         }
 
@@ -524,14 +538,16 @@ private enum TaskDraftPromptBuilder {
            !timeZoneIdentifier.isEmpty {
             lines.append("userTimeZone: \(timeZoneIdentifier)")
         }
-        if let imageAttachment = input.imageAttachment {
+        for (index, imageAttachment) in input.allImageAttachments.enumerated() {
             let filename = imageAttachment.filename?.trimmingCharacters(in: .whitespacesAndNewlines)
-            lines.append("directImageAttachment: \(filename?.isEmpty == false ? filename! : imageAttachment.mimeType)")
+            let label = input.allImageAttachments.count > 1 ? "directImageAttachment\(index + 1)" : "directImageAttachment"
+            lines.append("\(label): \(filename?.isEmpty == false ? filename! : imageAttachment.mimeType)")
             lines.append("imageInstruction: Read visible text, layout, tables, and formatting directly from the image attachment. Do not require OCR text if the image is attached.")
         }
-        if let audioAttachment = input.audioAttachment {
+        for (index, audioAttachment) in input.allAudioAttachments.enumerated() {
             let filename = audioAttachment.filename?.trimmingCharacters(in: .whitespacesAndNewlines)
-            lines.append("directAudioAttachment: \(filename?.isEmpty == false ? filename! : audioAttachment.format)")
+            let label = input.allAudioAttachments.count > 1 ? "directAudioAttachment\(index + 1)" : "directAudioAttachment"
+            lines.append("\(label): \(filename?.isEmpty == false ? filename! : audioAttachment.format)")
             lines.append("audioInstruction: Transcribe and extract tasks directly from the audio attachment. The result must still be draft-first JSON.")
         }
         guard !lines.isEmpty else { return "" }

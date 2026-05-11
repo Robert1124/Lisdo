@@ -88,19 +88,6 @@ struct LisdoDraftReviewSheet: View {
     private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(sourceText)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(6)
-                } label: {
-                    Label("Source text / OCR text", systemImage: "doc.text.magnifyingglass")
-                }
-
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 14) {
                     GridRow {
                         Text("Category")
@@ -322,20 +309,6 @@ struct LisdoDraftReviewSheet: View {
             .buttonStyle(.borderless)
             .help("Remove item")
         }
-    }
-
-    private var sourceText: String {
-        guard let capture = captures.first(where: { $0.id == draft.captureItemId }) else {
-            return "Original capture is not available in this store. Review the generated draft fields below."
-        }
-        let text = capture.sourceText ?? capture.transcriptText ?? capture.userNote
-        if let text, !text.lisdoTrimmed.isEmpty {
-            return text
-        }
-        if let imageId = capture.sourceImageAssetId {
-            return "Imported image: \(imageId). OCR text is unavailable for this saved draft."
-        }
-        return "No source text was stored for this capture."
     }
 
     private func addBlock() {
