@@ -8,7 +8,7 @@ options:
 settings:
   base:
     DEVELOPMENT_TEAM: WDAN6HW5VM
-    MARKETING_VERSION: "1.0"
+    MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "2"
     SWIFT_VERSION: "5.9"
     ENABLE_USER_SCRIPT_SANDBOXING: "YES"
@@ -29,7 +29,7 @@ targets:
       path: Apps/iOS/Info.plist
       properties:
         CFBundleDisplayName: Lisdo
-        CFBundleShortVersionString: "1.0"
+        CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "2"
         NSCameraUsageDescription: Lisdo uses the camera to capture notes, screenshots, and documents so they can become reviewable task drafts.
         NSMicrophoneUsageDescription: Lisdo records voice captures so you can review the transcript before creating a task draft.
@@ -139,7 +139,7 @@ targets:
       path: Extensions/Widgets/Info.plist
       properties:
         CFBundleDisplayName: Lisdo
-        CFBundleShortVersionString: "1.0"
+        CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "2"
         ITSAppUsesNonExemptEncryption: false
         NSExtension:
@@ -177,7 +177,7 @@ targets:
       path: Extensions/Share/Info.plist
       properties:
         CFBundleDisplayName: Lisdo
-        CFBundleShortVersionString: "1.0"
+        CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "2"
         ITSAppUsesNonExemptEncryption: false
         NSExtension:
