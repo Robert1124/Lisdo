@@ -220,6 +220,17 @@ button {
   fill: currentColor;
 }
 
+.pill-button svg.download-cloud-icon {
+  width: 23px;
+  height: 23px;
+  margin-right: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .icon-button.large svg {
   width: 18px;
   height: 18px;
