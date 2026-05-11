@@ -2827,6 +2827,7 @@ private struct LisdoPlanCalendarBand: View {
                     .foregroundStyle(.secondary)
             }
 
+#if compiler(>=6.2)
             if #available(macOS 26.0, *) {
                 GlassEffectContainer(spacing: 8) {
                     calendarBodyContent
@@ -2834,6 +2835,9 @@ private struct LisdoPlanCalendarBand: View {
             } else {
                 calendarBodyContent
             }
+#else
+            calendarBodyContent
+#endif
         }
         .padding(14)
         .lisdoGlassSurface(cornerRadius: 18)

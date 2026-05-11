@@ -155,6 +155,7 @@ extension View {
     @ViewBuilder
     func lisdoGlassSurface(cornerRadius: CGFloat, tint: Color? = nil, interactive: Bool = false) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+#if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             let glass = interactive ? Glass.regular.interactive() : Glass.regular
             if let tint {
@@ -169,10 +170,18 @@ extension View {
                     shape.strokeBorder(LisdoMacTheme.divider.opacity(0.72))
                 }
         }
+#else
+        self
+            .background(.regularMaterial, in: shape)
+            .overlay {
+                shape.strokeBorder(LisdoMacTheme.divider.opacity(0.72))
+            }
+#endif
     }
 
     @ViewBuilder
     func lisdoGlassButtonStyle(prominent: Bool = false) -> some View {
+#if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             if prominent {
                 self.buttonStyle(.glassProminent)
@@ -186,6 +195,13 @@ extension View {
                 self.buttonStyle(.bordered)
             }
         }
+#else
+        if prominent {
+            self.buttonStyle(.borderedProminent)
+        } else {
+            self.buttonStyle(.bordered)
+        }
+#endif
     }
 }
 
