@@ -4,7 +4,9 @@ Lisdo publishes Developer ID macOS builds through `.github/workflows/macos-relea
 The workflow runs for `v*` tags or manual dispatch, archives the `LisdoMac`
 scheme, validates the Developer ID signature, notarizes the app and DMG,
 staples both artifacts, generates the Mac appcast, uploads release assets to
-GitHub Releases, and deploys the appcast to Cloudflare.
+GitHub Releases, publishes the release, and commits the generated appcast to
+`Website/appcast.xml` on the repository default branch. Cloudflare Pages then
+deploys the website from that repo push.
 
 ## Required GitHub Secrets
 
@@ -16,27 +18,15 @@ GitHub Releases, and deploys the appcast to Cloudflare.
 - `NOTARY_KEY_ID`
 - `NOTARY_ISSUER_ID`
 - `NOTARY_PRIVATE_KEY_BASE64`, a base64-encoded `AuthKey_*.p8`
-- `CLOUDFLARE_API_TOKEN`, with permission to edit Workers scripts and Workers routes for the zone
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_ZONE_ID`
 
 The macOS app currently uses iCloud, app groups, and Keychain access groups.
 Those entitlements require a Developer ID provisioning profile for CI signing.
 Export the LisdoMac Developer ID profile from the Apple Developer portal and
 store it in `DEVELOPER_ID_PROVISIONING_PROFILE_BASE64`.
 
-The Cloudflare secrets are required because the Mac app reads
-`https://lisdo.robertw.me/appcast.xml` from `SUFeedURL`. That host is served
-outside this repository's GitHub Pages setup, so the release workflow updates
-only an exact Cloudflare Worker route for `lisdo.robertw.me/appcast.xml`.
-Do not use a Cloudflare Pages whole-site deploy for the appcast, because that
-could overwrite unrelated website routes.
-
-Optional repository variables:
-
-- `CLOUDFLARE_WORKER_NAME`, default `lisdo-appcast`
-- `CLOUDFLARE_WORKER_ROUTE`, default `lisdo.robertw.me/appcast.xml`
-- `CLOUDFLARE_WORKER_COMPATIBILITY_DATE`, default `2024-11-01`
+No Cloudflare credentials are required. The Mac app reads
+`https://lisdo.robertw.me/appcast.xml` from `SUFeedURL`, and that file is
+published from this repository's `Website/appcast.xml` by Cloudflare Pages.
 
 Useful local encoding commands:
 
@@ -79,13 +69,15 @@ with the GitHub Release URL, DMG download URL, DMG byte length,
 `GITHUB_RUN_NUMBER`, matching the archive's `CURRENT_PROJECT_VERSION`.
 
 The workflow then uploads the appcast as a GitHub Release asset and runs
-`script/deploy_cloudflare_worker_appcast.sh`. The deploy script uploads a
-module Worker named `lisdo-appcast` by default and creates or updates only the
-route `lisdo.robertw.me/appcast.xml`. The Worker serves the XML with:
+`gh release edit` to publish the release. After the release is public, the
+workflow preserves the generated XML in `$RUNNER_TEMP/generated-appcast.xml`,
+checks out the repository default branch, copies it to `Website/appcast.xml`,
+and commits only that file if the contents changed. Pushing that commit lets
+Cloudflare Pages publish `https://lisdo.robertw.me/appcast.xml` through the
+normal website deployment.
 
-- `content-type: application/xml; charset=utf-8`
-- `access-control-allow-origin: *`
-- `cache-control: public, max-age=0, must-revalidate`
+The same `appcast.xml` is also uploaded as a workflow artifact with the DMG and
+checksum so each Actions run keeps the exact generated feed.
 
 ## Local Dry Run
 
