@@ -75,6 +75,43 @@ jobs:
             brew install xcodegen
           fi
 
+      - name: Select Xcode 26
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          xcode_apps=(/Applications/Xcode_26*.app /Applications/Xcode.app)
+          selected_developer_dir=""
+          for ((idx=${#xcode_apps[@]} - 1; idx >= 0; idx--)); do
+            candidate="${xcode_apps[$idx]}"
+            developer_dir="$candidate/Contents/Developer"
+            if [[ ! -d "$developer_dir" ]]; then
+              continue
+            fi
+
+            version="$(DEVELOPER_DIR="$developer_dir" xcodebuild -version | awk 'NR == 1 {print $2}')"
+            if [[ "$version" == 26.* ]]; then
+              selected_developer_dir="$developer_dir"
+              break
+            fi
+          done
+
+          if [[ -z "$selected_developer_dir" ]]; then
+            echo "No Xcode 26 installation was found on this runner." >&2
+            ls -1d /Applications/Xcode*.app 2>/dev/null || true
+            exit 1
+          fi
+
+          sudo xcode-select -s "$selected_developer_dir"
+          xcodebuild -version
+          sdk_version="$(xcrun --sdk macosx --show-sdk-version)"
+          echo "Selected macOS SDK $sdk_version"
+          if [[ "$sdk_version" != 26.* ]]; then
+            echo "Expected a macOS 26 SDK after selecting Xcode 26, got $sdk_version." >&2
+            exit 1
+          fi
+
       - name: Import Developer ID certificate
         shell: bash
         run: |
