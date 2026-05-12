@@ -800,6 +800,8 @@ struct LisdoExpandableTodoCard: View {
 }
 
 private struct LisdoCompactTodoRow: View {
+    @Environment(\.calendar) private var calendar
+
     let todo: Todo
     let category: Category?
     let onOpen: () -> Void
@@ -837,8 +839,8 @@ private struct LisdoCompactTodoRow: View {
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1)
                         }
-                        if todo.isLisdoOverdue() {
-                            LisdoOverdueChip()
+                        if let timingChip = todo.lisdoTimingChip(calendar: calendar) {
+                            LisdoTodoTimingChip(chip: timingChip)
                         }
                     }
 
@@ -913,6 +915,8 @@ private struct LisdoCompactTodoRow: View {
 }
 
 struct LisdoTodoCard: View {
+    @Environment(\.calendar) private var calendar
+
     let todo: Todo
     let category: Category?
     var onToggleCompletion: (() -> Void)?
@@ -949,8 +953,8 @@ struct LisdoTodoCard: View {
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
-                    if todo.isLisdoOverdue() {
-                        LisdoOverdueChip()
+                    if let timingChip = todo.lisdoTimingChip(calendar: calendar) {
+                        LisdoTodoTimingChip(chip: timingChip)
                     }
                 }
 
@@ -1036,32 +1040,159 @@ struct LisdoTodoCard: View {
     }
 }
 
-private struct LisdoOverdueChip: View {
+private struct LisdoTodoTimingChip: View {
+    let chip: LisdoTodoTimingChipModel
+
     var body: some View {
-        Text("Overdue")
+        Text(chip.title)
             .font(.caption.weight(.medium))
             .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .foregroundStyle(LisdoMacTheme.ink2)
-            .background(LisdoMacTheme.surface, in: Capsule())
+            .foregroundStyle(chip.foreground)
+            .background(chip.background, in: Capsule())
             .overlay {
                 Capsule()
-                    .strokeBorder(LisdoMacTheme.divider.opacity(0.86))
+                    .strokeBorder(chip.border)
             }
-            .accessibilityLabel("Overdue")
+            .accessibilityLabel(chip.title)
+    }
+}
+
+private enum LisdoTodoTimingChipModel {
+    case overdue
+    case upcoming(String)
+
+    var title: String {
+        switch self {
+        case .overdue:
+            return "Overdue"
+        case .upcoming(let title):
+            return title
+        }
+    }
+
+    var foreground: Color {
+        switch self {
+        case .overdue:
+            return LisdoTodoTimingPalette.overdueForeground
+        case .upcoming:
+            return LisdoTodoTimingPalette.upcomingForeground
+        }
+    }
+
+    var background: Color {
+        switch self {
+        case .overdue:
+            return LisdoTodoTimingPalette.overdueBackground
+        case .upcoming:
+            return LisdoTodoTimingPalette.upcomingBackground
+        }
+    }
+
+    var border: Color {
+        switch self {
+        case .overdue:
+            return LisdoTodoTimingPalette.overdueBorder
+        case .upcoming:
+            return LisdoTodoTimingPalette.upcomingBorder
+        }
+    }
+}
+
+private enum LisdoTodoTimingPalette {
+    static let overdueForeground = adaptiveColor(light: 0x7A1F1F, dark: 0xF1B5B5)
+    static let overdueBackground = adaptiveColor(light: 0xFCEEEE, dark: 0x3A1717)
+    static let overdueBorder = adaptiveColor(light: 0xE6B8B8, dark: 0x6F3030)
+
+    static let upcomingForeground = adaptiveColor(light: 0x6F4C00, dark: 0xF1D18A)
+    static let upcomingBackground = adaptiveColor(light: 0xFFF6D8, dark: 0x342708)
+    static let upcomingBorder = adaptiveColor(light: 0xE7C66E, dark: 0x6B5516)
+
+    private static func adaptiveColor(light: UInt32, dark: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            NSColor(lisdoTimingHex: appearance.lisdoTimingUsesDarkColors ? dark : light)
+        })
+    }
+}
+
+private extension NSAppearance {
+    var lisdoTimingUsesDarkColors: Bool {
+        bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+}
+
+private extension NSColor {
+    convenience init(lisdoTimingHex hex: UInt32, alpha: CGFloat = 1) {
+        let red = CGFloat((hex >> 16) & 0xFF) / 255
+        let green = CGFloat((hex >> 8) & 0xFF) / 255
+        let blue = CGFloat(hex & 0xFF) / 255
+        self.init(srgbRed: red, green: green, blue: blue, alpha: alpha)
     }
 }
 
 private extension Todo {
     func isLisdoOverdue(relativeTo now: Date = Date()) -> Bool {
-        guard status == .open || status == .inProgress,
-              let dueDate
-        else {
-            return false
+        lisdoOverdueDate(relativeTo: now) != nil
+    }
+
+    func lisdoTimingChip(relativeTo now: Date = Date(), calendar: Calendar) -> LisdoTodoTimingChipModel? {
+        guard isLisdoActive else {
+            return nil
         }
 
-        return dueDate < now
+        if isLisdoOverdue(relativeTo: now) {
+            return .overdue
+        }
+
+        guard let daysLeft = lisdoUpcomingDaysLeft(relativeTo: now, calendar: calendar) else {
+            return nil
+        }
+
+        switch daysLeft {
+        case 0:
+            return .upcoming("Today")
+        case 1:
+            return .upcoming("1 day left")
+        case 2:
+            return .upcoming("2 days left")
+        case 3:
+            return .upcoming("3 days left")
+        default:
+            return nil
+        }
+    }
+
+    private var isLisdoActive: Bool {
+        status == .open || status == .inProgress
+    }
+
+    private func lisdoOverdueDate(relativeTo now: Date) -> Date? {
+        guard isLisdoActive else {
+            return nil
+        }
+
+        return [dueDate, scheduledDate]
+            .compactMap { $0 }
+            .filter { $0 < now }
+            .min()
+    }
+
+    private func lisdoUpcomingDaysLeft(relativeTo now: Date, calendar: Calendar) -> Int? {
+        [dueDate, scheduledDate]
+            .compactMap { $0 }
+            .filter { $0 >= now }
+            .compactMap { date -> Int? in
+                let startOfToday = calendar.startOfDay(for: now)
+                let startOfTargetDay = calendar.startOfDay(for: date)
+                guard let day = calendar.dateComponents([.day], from: startOfToday, to: startOfTargetDay).day,
+                      (0...3).contains(day)
+                else {
+                    return nil
+                }
+                return day
+            }
+            .min()
     }
 }
 
@@ -3322,8 +3453,8 @@ private struct LisdoPlanTodoRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if todo.isLisdoOverdue(relativeTo: now) {
-                        LisdoOverdueChip()
+                    if let timingChip = todo.lisdoTimingChip(relativeTo: now, calendar: calendar) {
+                        LisdoTodoTimingChip(chip: timingChip)
                     }
 
                     if let priority = todo.priority {
