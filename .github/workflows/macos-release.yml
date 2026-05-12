@@ -28,6 +28,12 @@ jobs:
       NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
       NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
       NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.NOTARY_PRIVATE_KEY_BASE64 }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      CLOUDFLARE_WORKER_NAME: ${{ vars.CLOUDFLARE_WORKER_NAME }}
+      CLOUDFLARE_WORKER_ROUTE: ${{ vars.CLOUDFLARE_WORKER_ROUTE }}
+      CLOUDFLARE_WORKER_COMPATIBILITY_DATE: ${{ vars.CLOUDFLARE_WORKER_COMPATIBILITY_DATE }}
 
     steps:
       - name: Check out source
@@ -51,7 +57,10 @@ jobs:
             DEVELOPER_ID_PROVISIONING_PROFILE_BASE64 \
             NOTARY_KEY_ID \
             NOTARY_ISSUER_ID \
-            NOTARY_PRIVATE_KEY_BASE64
+            NOTARY_PRIVATE_KEY_BASE64 \
+            CLOUDFLARE_API_TOKEN \
+            CLOUDFLARE_ACCOUNT_ID \
+            CLOUDFLARE_ZONE_ID
           do
             if [[ -z "${!name:-}" ]]; then
               missing+=("$name")
@@ -286,6 +295,32 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose=4 "$PACKAGE"
           shasum -a 256 "$PACKAGE" > "$PACKAGE.sha256"
 
+      - name: Generate appcast
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="${RELEASE_VERSION#v}"
+          PACKAGE="dist/release/Lisdo-${APP_VERSION}.dmg"
+          APPCAST="dist/release/appcast.xml"
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_VERSION}"
+          DMG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_VERSION}/Lisdo-${APP_VERSION}.dmg"
+          RELEASE_NOTES=".github/releases/${RELEASE_VERSION}.md"
+
+          args=(
+            --version "$APP_VERSION"
+            --build "$GITHUB_RUN_NUMBER"
+            --release-url "$RELEASE_URL"
+            --dmg-url "$DMG_URL"
+            --dmg-path "$PACKAGE"
+            --output "$APPCAST"
+          )
+          if [[ -f "$RELEASE_NOTES" ]]; then
+            args+=(--release-notes-file "$RELEASE_NOTES")
+          fi
+
+          python3 script/generate_mac_appcast.py "${args[@]}"
+          test -s "$APPCAST"
+
       - name: Create or update GitHub Release
         shell: bash
         env:
@@ -293,6 +328,7 @@ jobs:
         run: |
           set -euo pipefail
           PACKAGE="dist/release/Lisdo-${RELEASE_VERSION#v}.dmg"
+          APPCAST="dist/release/appcast.xml"
           RELEASE_NOTES=".github/releases/${RELEASE_VERSION}.md"
           if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
             echo "GitHub Release $RELEASE_VERSION already exists."
@@ -301,7 +337,20 @@ jobs:
           else
             gh release create "$RELEASE_VERSION" --draft --title "$RELEASE_VERSION" --notes "Lisdo ${RELEASE_VERSION}"
           fi
-          gh release upload "$RELEASE_VERSION" "$PACKAGE" "$PACKAGE.sha256" --clobber
+          gh release upload "$RELEASE_VERSION" "$PACKAGE" "$PACKAGE.sha256" "$APPCAST" --clobber
+
+      - name: Deploy appcast to Cloudflare Worker route
+        shell: bash
+        run: |
+          set -euo pipefail
+          script/deploy_cloudflare_worker_appcast.sh dist/release/appcast.xml
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
           gh release edit "$RELEASE_VERSION" --draft=false
 
       - name: Upload release artifacts
@@ -311,4 +360,5 @@ jobs:
           path: |
             dist/release/Lisdo-*.dmg
             dist/release/Lisdo-*.dmg.sha256
+            dist/release/appcast.xml
           if-no-files-found: error
