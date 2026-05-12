@@ -165,6 +165,52 @@ jobs:
             exit 1
           fi
 
+      - name: Re-sign Sparkle framework for Developer ID notarization
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="dist/Lisdo.app"
+          SPARKLE_FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+          if [[ ! -d "$SPARKLE_FRAMEWORK" ]]; then
+            echo "Sparkle.framework was not embedded in $APP." >&2
+            exit 1
+          fi
+
+          sign_preserving_entitlements() {
+            local item="$1"
+            local entitlements="$RUNNER_TEMP/$(basename "$item").entitlements.plist"
+            if codesign -d --entitlements :- "$item" > "$entitlements" 2>/dev/null \
+              && plutil -lint "$entitlements" >/dev/null 2>&1; then
+              codesign --force --timestamp --options runtime \
+                --entitlements "$entitlements" \
+                --sign "$DEVELOPER_ID_APPLICATION" \
+                "$item"
+            else
+              codesign --force --timestamp --options runtime \
+                --sign "$DEVELOPER_ID_APPLICATION" \
+                "$item"
+            fi
+          }
+
+          sign_preserving_entitlements "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Downloader.xpc"
+          sign_preserving_entitlements "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Installer.xpc"
+          sign_preserving_entitlements "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
+          sign_preserving_entitlements "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
+          sign_preserving_entitlements "$SPARKLE_FRAMEWORK"
+          sign_preserving_entitlements "$APP"
+
+          codesign --verify --strict --deep "$APP"
+          for nested_item in \
+            "$SPARKLE_FRAMEWORK/Versions/B/Updater.app" \
+            "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate" \
+            "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Downloader.xpc" \
+            "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Installer.xpc"
+          do
+            codesign -dv --verbose=4 "$nested_item" 2>&1 | tee "$RUNNER_TEMP/$(basename "$nested_item").codesign.txt"
+            grep -q 'Authority=Developer ID Application:' "$RUNNER_TEMP/$(basename "$nested_item").codesign.txt"
+            grep -q 'Timestamp=' "$RUNNER_TEMP/$(basename "$nested_item").codesign.txt"
+          done
+
       - name: Validate Developer ID app bundle
         shell: bash
         run: |
