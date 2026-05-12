@@ -10,6 +10,7 @@ struct LisdoMacApp: App {
     @NSApplicationDelegateAdaptor(LisdoMacAppDelegate.self) private var appDelegate
     private let modelContainerResult: LisdoMacModelContainer.Result
     @StateObject private var iCloudSyncStatusMonitor: LisdoICloudSyncStatusMonitor
+    @StateObject private var sparkleUpdater: LisdoMacSparkleUpdater
 
     init() {
         let result = LisdoMacModelContainer.make()
@@ -20,6 +21,7 @@ struct LisdoMacApp: App {
                 fallbackErrorDescription: result.fallbackErrorDescription
             )
         )
+        self._sparkleUpdater = StateObject(wrappedValue: LisdoMacSparkleUpdater())
     }
 
     var body: some Scene {
@@ -30,6 +32,14 @@ struct LisdoMacApp: App {
                 .frame(minWidth: 880, minHeight: 620)
         }
         .windowToolbarStyle(.unified)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates...") {
+                    sparkleUpdater.checkForUpdates()
+                }
+                .disabled(!sparkleUpdater.canCheckForUpdates)
+            }
+        }
 
         MenuBarExtra("Lisdo", systemImage: "tray.full") {
             LisdoMenuBarCaptureView()
@@ -40,6 +50,7 @@ struct LisdoMacApp: App {
         Settings {
             LisdoMacProviderSettingsView()
                 .modelContainer(modelContainerResult.container)
+                .environmentObject(sparkleUpdater)
                 .frame(width: 560, height: 580)
         }
     }

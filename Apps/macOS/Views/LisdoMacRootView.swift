@@ -287,17 +287,30 @@ private struct LisdoMacToolbarContent: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            HStack(spacing: 10) {
+            LisdoMacToolbarItemHost {
                 LisdoMacSearchToolbarControl(
                     text: $searchText,
                     isExpanded: $isSearchExpanded
                 )
+            }
+        }
 
+        ToolbarItem(placement: .primaryAction) {
+            LisdoMacToolbarItemHost {
                 filterButton
+            }
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            LisdoMacToolbarItemHost {
                 quickCaptureButton
+            }
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            LisdoMacToolbarItemHost {
                 settingsButton
             }
-            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -370,24 +383,28 @@ private struct LisdoMacSearchToolbarControl: View {
                     TextField("Search captures, drafts, todos", text: $text)
                         .textFieldStyle(.plain)
                         .focused($isSearchFocused)
+                        .tint(LisdoMacTheme.ink2)
                         .frame(width: 230)
 
-                    if !text.isEmpty {
-                        Button {
-                            text = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(LisdoMacTheme.ink4)
-                        }
-                        .buttonStyle(.plain)
-                        .focusable(false)
-                        .focusEffectDisabled()
-                        .help("Clear search")
+                    Button {
+                        text = ""
+                        isSearchFocused = false
+                        isExpanded = false
+                        NSApp.keyWindow?.makeFirstResponder(nil)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(LisdoMacTheme.ink4)
                     }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .focusEffectDisabled()
+                    .help("Close search")
+                    .accessibilityLabel("Close Search")
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 32)
+                .padding(.leading, 12)
+                .padding(.trailing, 10)
+                .frame(height: 38)
                 .background(LisdoMacTheme.surface2, in: Capsule())
                 .overlay {
                     Capsule()
@@ -417,6 +434,20 @@ private struct LisdoMacSearchToolbarControl: View {
     }
 }
 
+private struct LisdoMacToolbarItemHost<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(.horizontal, 3)
+            .frame(minWidth: 46, minHeight: 42)
+    }
+}
+
 private struct LisdoMacToolbarCircleLabel: View {
     let systemImage: String
     var foreground: Color = LisdoMacTheme.ink2
@@ -426,7 +457,7 @@ private struct LisdoMacToolbarCircleLabel: View {
         Image(systemName: systemImage)
             .font(.callout.weight(.semibold))
             .foregroundStyle(foreground)
-            .frame(width: 38, height: 38)
+            .frame(width: 40, height: 40)
             .background(background, in: Circle())
             .overlay {
                 Circle()

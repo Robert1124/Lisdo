@@ -4,6 +4,7 @@ import SwiftUI
 
 struct LisdoMacProviderSettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var sparkleUpdater: LisdoMacSparkleUpdater
     @Query(sort: \LisdoSyncedSettings.updatedAt, order: .reverse) private var syncedSettings: [LisdoSyncedSettings]
 
     private let credentialStore = KeychainCredentialStore()
@@ -26,9 +27,6 @@ struct LisdoMacProviderSettingsView: View {
     @State private var imageProcessingModeRawValue = LisdoSyncedSettings.defaultImageProcessingModeRawValue
     @State private var voiceProcessingModeRawValue = LisdoSyncedSettings.defaultVoiceProcessingModeRawValue
     @State private var isApplyingSyncedSettings = false
-    @State private var updateStatus = ""
-    @State private var isCheckingUpdates = false
-    @State private var latestUpdateURL: URL?
     @State private var selectedSettingsTab: LisdoMacSettingsTab = .capture
     @AppStorage(LisdoMacHotKeyPreferences.quickCapturePresetDefaultsKey) private var quickCaptureHotKeyPresetId = LisdoMacHotKeyPreferences.defaultQuickCapturePresetId
     @AppStorage(LisdoMacHotKeyPreferences.selectedAreaPresetDefaultsKey) private var selectedAreaHotKeyPresetId = LisdoMacHotKeyPreferences.defaultSelectedAreaPresetId
@@ -267,24 +265,20 @@ struct LisdoMacProviderSettingsView: View {
             }
 
             Section {
-                if !updateStatus.isEmpty {
-                    Text(updateStatus)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(sparkleUpdater.statusMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 HStack {
                     Button {
-                        Task {
-                            await checkForUpdates()
-                        }
+                        sparkleUpdater.checkForUpdates()
                     } label: {
-                        Label(isCheckingUpdates ? "Checking" : "Check for updates", systemImage: "arrow.clockwise")
+                        Label("Check for updates", systemImage: "arrow.clockwise")
                     }
-                    .disabled(isCheckingUpdates)
+                    .disabled(!sparkleUpdater.canCheckForUpdates)
 
-                    Link("Release notes", destination: latestUpdateURL ?? versionInfo.updatesPageURL)
+                    Link("Release notes", destination: versionInfo.updatesPageURL)
                 }
             } header: {
                 Text("Updates")
@@ -600,37 +594,6 @@ struct LisdoMacProviderSettingsView: View {
 
     private func notifyHotKeySettingsChanged() {
         NotificationCenter.default.post(name: LisdoMacNotifications.hotKeysChanged, object: nil)
-    }
-
-    @MainActor
-    private func checkForUpdates() async {
-        guard !isCheckingUpdates else { return }
-
-        isCheckingUpdates = true
-        updateStatus = "Checking \(versionInfo.appcastURL.host() ?? "appcast")..."
-        defer { isCheckingUpdates = false }
-
-        do {
-            let result = try await LisdoMacUpdateChecker.check(currentVersion: versionInfo)
-            switch result {
-            case .noPublishedUpdates:
-                latestUpdateURL = versionInfo.updatesPageURL
-                updateStatus = "No signed Mac update is published in the appcast yet. Current version \(versionInfo.shortVersion) (\(versionInfo.buildVersion)) is the installed build."
-            case .upToDate(let remote):
-                latestUpdateURL = remote?.link ?? versionInfo.updatesPageURL
-                if let remote {
-                    updateStatus = "Lisdo is up to date. Latest appcast build is \(remote.displayVersion), and this Mac has \(versionInfo.shortVersion) (\(versionInfo.buildVersion))."
-                } else {
-                    updateStatus = "Lisdo is up to date. Current version \(versionInfo.shortVersion) (\(versionInfo.buildVersion)) is installed."
-                }
-            case .updateAvailable(let release):
-                latestUpdateURL = release.link ?? versionInfo.updatesPageURL
-                updateStatus = "A newer Lisdo build is available: \(release.displayVersion). Open Release notes to view the update."
-            }
-        } catch {
-            latestUpdateURL = versionInfo.updatesPageURL
-            updateStatus = "Could not check updates: \(error.localizedDescription)"
-        }
     }
 
     private func reconcileProviderAfterRemoval(removedMode: ProviderMode) {

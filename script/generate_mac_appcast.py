@@ -52,6 +52,7 @@ def build_appcast(
     dmg_url: str,
     dmg_path: Path,
     release_notes: str | None,
+    ed_signature: str | None,
 ) -> ET.ElementTree:
     ET.register_namespace("sparkle", SPARKLE_NS)
 
@@ -67,17 +68,17 @@ def build_appcast(
     ET.SubElement(item, "link").text = release_url
     if release_notes:
         ET.SubElement(item, "description").text = release_notes
-    ET.SubElement(
-        item,
-        "enclosure",
-        {
-            "url": dmg_url,
-            f"{{{SPARKLE_NS}}}shortVersionString": version,
-            f"{{{SPARKLE_NS}}}version": build,
-            "length": str(dmg_path.stat().st_size),
-            "type": DMG_MIME_TYPE,
-        },
-    )
+    enclosure_attrs = {
+        "url": dmg_url,
+        f"{{{SPARKLE_NS}}}shortVersionString": version,
+        f"{{{SPARKLE_NS}}}version": build,
+        "length": str(dmg_path.stat().st_size),
+        "type": DMG_MIME_TYPE,
+    }
+    if ed_signature is not None:
+        enclosure_attrs[f"{{{SPARKLE_NS}}}edSignature"] = ed_signature
+
+    ET.SubElement(item, "enclosure", enclosure_attrs)
 
     ET.indent(rss, space="  ")
     return ET.ElementTree(rss)
@@ -97,6 +98,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dmg-url", required=True, type=lambda value: valid_https_url(value, "DMG URL"))
     parser.add_argument("--dmg-path", required=True, type=existing_file)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--ed-signature",
+        type=lambda value: non_empty(value, "edSignature"),
+        help="Optional Sparkle EdDSA signature to add to the enclosure as sparkle:edSignature.",
+    )
 
     notes = parser.add_mutually_exclusive_group()
     notes.add_argument("--release-notes", help="Optional release notes text for the appcast item.")
@@ -119,6 +125,7 @@ def main(argv: list[str]) -> int:
         dmg_url=args.dmg_url,
         dmg_path=args.dmg_path,
         release_notes=release_notes,
+        ed_signature=args.ed_signature,
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

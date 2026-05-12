@@ -15,6 +15,9 @@ settings:
 packages:
   LisdoCore:
     path: Packages/LisdoCore
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.9.1
 targets:
   LisdoiOS:
     type: application
@@ -95,6 +98,11 @@ targets:
         NSSpeechRecognitionUsageDescription: Lisdo uses speech recognition to turn voice captures into transcripts for draft review.
         ITSAppUsesNonExemptEncryption: false
         SUFeedURL: https://lisdo.robertw.me/appcast.xml
+        SUPublicEDKey: $(LISDO_SPARKLE_PUBLIC_ED_KEY)
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: true
+        SUAllowsAutomaticUpdates: true
+        SUEnableInstallerLauncherService: true
     entitlements:
       path: Apps/macOS/LisdoMac.entitlements
       properties:
@@ -109,6 +117,9 @@ targets:
           - group.com.yiwenwu.Lisdo
         com.apple.security.device.audio-input: true
         com.apple.security.files.user-selected.read-only: true
+        com.apple.security.temporary-exception.mach-lookup.global-name:
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spks
+          - $(PRODUCT_BUNDLE_IDENTIFIER)-spki
         com.apple.security.network.client: true
     settings:
       base:
@@ -117,9 +128,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.yiwenwu.Lisdo.macOS
         PRODUCT_NAME: Lisdo
         MACOSX_DEPLOYMENT_TARGET: "14.0"
+        LISDO_SPARKLE_PUBLIC_ED_KEY: ""
     dependencies:
       - package: LisdoCore
         product: LisdoCore
+      - package: Sparkle
+        product: Sparkle
       - sdk: AVFoundation.framework
       - sdk: Carbon.framework
       - sdk: ScreenCaptureKit.framework

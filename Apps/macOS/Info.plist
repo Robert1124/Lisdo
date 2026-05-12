@@ -24,7 +24,17 @@
 	<string>Lisdo records voice captures so you can review the transcript before creating a task draft.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Lisdo uses speech recognition to turn voice captures into transcripts for draft review.</string>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
 	<key>SUFeedURL</key>
 	<string>https://lisdo.robertw.me/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>$(LISDO_SPARKLE_PUBLIC_ED_KEY)</string>
 </dict>
 </plist>

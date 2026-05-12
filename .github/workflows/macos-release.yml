@@ -28,6 +28,8 @@ jobs:
       NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
       NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
       NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.NOTARY_PRIVATE_KEY_BASE64 }}
+      SPARKLE_PRIVATE_ED_KEY_BASE64: ${{ secrets.SPARKLE_PRIVATE_ED_KEY_BASE64 }}
+      LISDO_SPARKLE_PUBLIC_ED_KEY: ${{ secrets.LISDO_SPARKLE_PUBLIC_ED_KEY }}
 
     steps:
       - name: Check out source
@@ -51,7 +53,9 @@ jobs:
             DEVELOPER_ID_PROVISIONING_PROFILE_BASE64 \
             NOTARY_KEY_ID \
             NOTARY_ISSUER_ID \
-            NOTARY_PRIVATE_KEY_BASE64
+            NOTARY_PRIVATE_KEY_BASE64 \
+            SPARKLE_PRIVATE_ED_KEY_BASE64 \
+            LISDO_SPARKLE_PUBLIC_ED_KEY
           do
             if [[ -z "${!name:-}" ]]; then
               missing+=("$name")
@@ -123,15 +127,18 @@ jobs:
         run: |
           set -euo pipefail
           APP_VERSION="${RELEASE_VERSION#v}"
-          ARCHIVE_PATH="$PWD/dist/archive/Lisdo-${APP_VERSION}.xcarchive"
+          DIST_DIR="$PWD/dist"
+          DERIVED_DATA_PATH="$DIST_DIR/DerivedData"
+          ARCHIVE_PATH="$DIST_DIR/archive/Lisdo-${APP_VERSION}.xcarchive"
           rm -rf "$PWD/dist"
-          mkdir -p "$PWD/dist/archive"
+          mkdir -p "$DIST_DIR/archive" "$DERIVED_DATA_PATH"
 
           xcodebuild \
             -project Lisdo.xcodeproj \
             -scheme LisdoMac \
             -configuration Release \
             -destination 'generic/platform=macOS' \
+            -derivedDataPath "$DERIVED_DATA_PATH" \
             -archivePath "$ARCHIVE_PATH" \
             -allowProvisioningUpdates \
             archive \
@@ -141,6 +148,7 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="$LISDO_MAC_PROFILE_SPECIFIER" \
             MARKETING_VERSION="$APP_VERSION" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            LISDO_SPARKLE_PUBLIC_ED_KEY="$LISDO_SPARKLE_PUBLIC_ED_KEY" \
             OTHER_CODE_SIGN_FLAGS="--timestamp --options runtime"
 
           ARCHIVED_APP="$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name "*.app" -print -quit)"
@@ -151,6 +159,11 @@ jobs:
           /usr/bin/ditto "$ARCHIVED_APP" "$PWD/dist/Lisdo.app"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PWD/dist/Lisdo.app/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PWD/dist/Lisdo.app/Contents/Info.plist"
+          archived_public_ed_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$PWD/dist/Lisdo.app/Contents/Info.plist")"
+          if [[ "$archived_public_ed_key" != "$LISDO_SPARKLE_PUBLIC_ED_KEY" ]]; then
+            echo "Archived app SUPublicEDKey does not match LISDO_SPARKLE_PUBLIC_ED_KEY." >&2
+            exit 1
+          fi
 
       - name: Validate Developer ID app bundle
         shell: bash
@@ -164,6 +177,14 @@ jobs:
           codesign -d --entitlements :- "$APP" > "$RUNNER_TEMP/lisdo-entitlements.plist"
           /usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$RUNNER_TEMP/lisdo-entitlements.plist" | grep -q true
           /usr/libexec/PlistBuddy -c 'Print :com.apple.security.network.client' "$RUNNER_TEMP/lisdo-entitlements.plist" | grep -q true
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.temporary-exception.mach-lookup.global-name' "$RUNNER_TEMP/lisdo-entitlements.plist" | grep -q 'com.yiwenwu.Lisdo.macOS-spks'
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.temporary-exception.mach-lookup.global-name' "$RUNNER_TEMP/lisdo-entitlements.plist" | grep -q 'com.yiwenwu.Lisdo.macOS-spki'
+          /usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP/Contents/Info.plist" | grep -q '^https://lisdo.robertw.me/appcast.xml$'
+          /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.plist" | grep -q .
+          /usr/libexec/PlistBuddy -c 'Print :SUEnableAutomaticChecks' "$APP/Contents/Info.plist" | grep -q true
+          /usr/libexec/PlistBuddy -c 'Print :SUAutomaticallyUpdate' "$APP/Contents/Info.plist" | grep -q true
+          /usr/libexec/PlistBuddy -c 'Print :SUAllowsAutomaticUpdates' "$APP/Contents/Info.plist" | grep -q true
+          /usr/libexec/PlistBuddy -c 'Print :SUEnableInstallerLauncherService' "$APP/Contents/Info.plist" | grep -q true
 
       - name: Submit app bundle for notarization
         shell: bash
@@ -286,10 +307,50 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose=4 "$PACKAGE"
           shasum -a 256 "$PACKAGE" > "$PACKAGE.sha256"
 
+      - name: Sign DMG for Sparkle update validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE="dist/release/Lisdo-${RELEASE_VERSION#v}.dmg"
+          KEY_FILE="$RUNNER_TEMP/sparkle-ed-private-key"
+          SOURCE_PACKAGES="$PWD/dist/DerivedData/SourcePackages"
+          SIGN_UPDATE=""
+          if [[ -d "$SOURCE_PACKAGES" ]]; then
+            SIGN_UPDATE="$(find "$SOURCE_PACKAGES" -type f -path "*/Sparkle/bin/sign_update" -print -quit)"
+          fi
+
+          if [[ -z "$SIGN_UPDATE" || ! -x "$SIGN_UPDATE" ]]; then
+            echo "Sparkle sign_update tool was not found under dist/DerivedData/SourcePackages." >&2
+            exit 1
+          fi
+
+          umask 077
+          base64 --decode <<< "$SPARKLE_PRIVATE_ED_KEY_BASE64" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          if [[ ! -s "$KEY_FILE" ]]; then
+            echo "Decoded Sparkle EdDSA private key is empty." >&2
+            exit 1
+          fi
+
+          sign_output="$("$SIGN_UPDATE" --ed-key-file "$KEY_FILE" "$PACKAGE")"
+          printf '%s\n' "$sign_output"
+
+          signature="$(ruby -e 'input = STDIN.read; match = input.match(/sparkle:edSignature="([^"]+)"/); abort "Missing sparkle:edSignature in sign_update output" unless match; print match[1]' <<< "$sign_output")"
+          if [[ -z "$signature" ]]; then
+            echo "Sparkle edSignature is empty." >&2
+            exit 1
+          fi
+          printf 'SPARKLE_ED_SIGNATURE=%s\n' "$signature" >> "$GITHUB_ENV"
+
       - name: Generate appcast
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "${SPARKLE_ED_SIGNATURE:-}" ]]; then
+            echo "SPARKLE_ED_SIGNATURE is missing. Sparkle update signing did not produce a signature." >&2
+            exit 1
+          fi
+
           APP_VERSION="${RELEASE_VERSION#v}"
           PACKAGE="dist/release/Lisdo-${APP_VERSION}.dmg"
           APPCAST="dist/release/appcast.xml"
@@ -304,6 +365,7 @@ jobs:
             --dmg-url "$DMG_URL"
             --dmg-path "$PACKAGE"
             --output "$APPCAST"
+            --ed-signature "$SPARKLE_ED_SIGNATURE"
           )
           if [[ -f "$RELEASE_NOTES" ]]; then
             args+=(--release-notes-file "$RELEASE_NOTES")

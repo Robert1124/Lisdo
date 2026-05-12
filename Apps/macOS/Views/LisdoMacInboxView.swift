@@ -837,6 +837,9 @@ private struct LisdoCompactTodoRow: View {
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1)
                         }
+                        if todo.isLisdoOverdue() {
+                            LisdoOverdueChip()
+                        }
                     }
 
                     Text(todo.title)
@@ -946,6 +949,9 @@ struct LisdoTodoCard: View {
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
+                    if todo.isLisdoOverdue() {
+                        LisdoOverdueChip()
+                    }
                 }
 
                 Text(todo.title)
@@ -1027,6 +1033,35 @@ struct LisdoTodoCard: View {
                 }
             }
         }
+    }
+}
+
+private struct LisdoOverdueChip: View {
+    var body: some View {
+        Text("Overdue")
+            .font(.caption.weight(.medium))
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .foregroundStyle(LisdoMacTheme.ink2)
+            .background(LisdoMacTheme.surface, in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(LisdoMacTheme.divider.opacity(0.86))
+            }
+            .accessibilityLabel("Overdue")
+    }
+}
+
+private extension Todo {
+    func isLisdoOverdue(relativeTo now: Date = Date()) -> Bool {
+        guard status == .open || status == .inProgress,
+              let dueDate
+        else {
+            return false
+        }
+
+        return dueDate < now
     }
 }
 
@@ -3287,6 +3322,10 @@ private struct LisdoPlanTodoRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    if todo.isLisdoOverdue(relativeTo: now) {
+                        LisdoOverdueChip()
+                    }
+
                     if let priority = todo.priority {
                         Text("· \(priorityLabel(priority))")
                             .font(.caption)
@@ -3402,11 +3441,11 @@ private struct LisdoPlanTodoRow: View {
     }
 
     private var timingIcon: String {
-        guard let itemDate = todo.resolvedLisdoPlanDate(calendar: calendar, now: now) else {
+        guard todo.resolvedLisdoPlanDate(calendar: calendar, now: now) != nil else {
             return "tray"
         }
 
-        if calendar.startOfDay(for: itemDate) < calendar.startOfDay(for: now), todo.status != .completed {
+        if todo.isLisdoOverdue(relativeTo: now) {
             return "exclamationmark.circle"
         }
 
