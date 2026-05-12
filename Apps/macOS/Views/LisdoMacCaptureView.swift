@@ -100,19 +100,16 @@ struct LisdoCaptureSheet: View {
             Button {
                 dismiss()
             } label: {
-                Text("Cancel")
-                    .font(.callout.weight(.semibold))
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .frame(height: 32)
-                    .background(LisdoMacTheme.surface2.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(LisdoMacTheme.divider.opacity(0.65))
-                    }
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
             .keyboardShortcut(.cancelAction)
             .buttonStyle(.plain)
+            .focusable(false)
+            .help("Close")
         }
         .padding(.horizontal, 20)
         .padding(.top, 18)
@@ -202,6 +199,7 @@ struct LisdoCaptureSheet: View {
                     .background(canOrganize && !isVoiceBusy ? LisdoMacTheme.ink1 : LisdoMacTheme.surface3, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .disabled(!canOrganize || isVoiceBusy)
         }
     }
@@ -253,6 +251,7 @@ struct LisdoCaptureSheet: View {
                         .frame(width: 42, height: 42)
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .foregroundStyle(.secondary)
                 .help("Close voice capture")
 
@@ -268,6 +267,7 @@ struct LisdoCaptureSheet: View {
                         .frame(width: 42, height: 42)
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .foregroundStyle(.secondary)
                 .disabled(isVoiceBusy && !voiceRecorder.isRecording)
                 .help("Record again")
@@ -290,6 +290,7 @@ struct LisdoCaptureSheet: View {
                     .background(LisdoMacTheme.ink1, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .disabled(isProcessingVoice || isTranscribingVoice)
             .keyboardShortcut(.defaultAction)
         } else {
@@ -310,6 +311,7 @@ struct LisdoCaptureSheet: View {
                     .shadow(color: .black.opacity(0.22), radius: 12, y: 5)
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .disabled(isProcessingVoice || isTranscribingVoice)
             .keyboardShortcut(.defaultAction)
             .help(voiceRecorder.isRecording ? "Stop recording" : "Start recording")
@@ -334,6 +336,7 @@ struct LisdoCaptureSheet: View {
             }
         }
         .buttonStyle(.plain)
+        .focusable(false)
     }
 
     private var organizeButtonTitle: String {

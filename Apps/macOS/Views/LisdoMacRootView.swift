@@ -14,7 +14,6 @@ struct LisdoMacRootView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var searchText = ""
     @State private var isSearchExpanded = false
-    @State private var isApplyingDeferredColumnVisibility = false
     @State private var captureRequest: LisdoMacCaptureRequest?
     @State private var showsNewCategory = false
     @State private var showsFilterPopover = false
@@ -59,15 +58,14 @@ struct LisdoMacRootView: View {
                 }
             )
         }
-        .onChange(of: columnVisibility) { previousVisibility, requestedVisibility in
-            deferColumnVisibilityChangeIfSearching(
-                from: previousVisibility,
-                to: requestedVisibility
-            )
-        }
         .onAppear(perform: bootstrapDefaultCategories)
         .onChange(of: categorySyncSignature) { _, _ in
             bootstrapDefaultCategories()
+        }
+        .onChange(of: showsFilterPopover) { _, isShowing in
+            if !isShowing {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: LisdoMacNotifications.openCapture)) { _ in
             captureRequest = LisdoMacCaptureRequest(initialAction: .text)
@@ -143,28 +141,6 @@ struct LisdoMacRootView: View {
                 priorities: searchFilters.priority.map { [$0] } ?? []
             )
         )
-    }
-
-    private func deferColumnVisibilityChangeIfSearching(
-        from previousVisibility: NavigationSplitViewVisibility,
-        to requestedVisibility: NavigationSplitViewVisibility
-    ) {
-        guard isSearchExpanded, !isApplyingDeferredColumnVisibility else { return }
-
-        isApplyingDeferredColumnVisibility = true
-        columnVisibility = previousVisibility
-
-        withAnimation(.snappy(duration: 0.18)) {
-            isSearchExpanded = false
-        }
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 180_000_000)
-            withAnimation(.snappy(duration: 0.22)) {
-                columnVisibility = requestedVisibility
-            }
-            isApplyingDeferredColumnVisibility = false
-        }
     }
 
     private var todayTodos: [Todo] {
@@ -307,52 +283,157 @@ private struct LisdoMacToolbarContent: ToolbarContent {
     @Binding var filters: LisdoMacSearchFilters
 
     let categories: [Category]
-
     let onCapture: () -> Void
 
     var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            LisdoToolbarSearchControl(
-                searchText: $searchText,
-                isExpanded: $isSearchExpanded
-            )
-
-            Button {
-                showsFilterPopover.toggle()
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.body.weight(.semibold))
-                    .overlay(alignment: .topTrailing) {
-                        if filters.hasActiveFilters {
-                            Circle()
-                                .fill(LisdoMacTheme.info)
-                                .frame(width: 6, height: 6)
-                                .padding(1)
-                        }
-                    }
-            }
-            .popover(isPresented: $showsFilterPopover, arrowEdge: .bottom) {
-                LisdoMacFilterPopover(
-                    filters: $filters,
-                    categories: categories
+        ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 10) {
+                LisdoMacSearchToolbarControl(
+                    text: $searchText,
+                    isExpanded: $isSearchExpanded
                 )
-            }
-            .help(filters.hasActiveFilters ? "Filter active" : "Filter")
 
-            Button(action: onCapture) {
-                Label("Capture", systemImage: "plus")
+                filterButton
+                quickCaptureButton
+                settingsButton
             }
-            .buttonStyle(.borderedProminent)
-            .labelStyle(.iconOnly)
-            .keyboardShortcut("n", modifiers: [.command])
-            .help("Capture")
-
-            SettingsLink {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .labelStyle(.iconOnly)
-            .help("Settings")
+            .fixedSize(horizontal: true, vertical: false)
         }
+    }
+
+    private var filterButton: some View {
+        Button {
+            showsFilterPopover.toggle()
+        } label: {
+            LisdoMacToolbarCircleLabel(
+                systemImage: filters.hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
+            )
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .focusEffectDisabled()
+        .popover(isPresented: $showsFilterPopover, arrowEdge: .bottom) {
+            LisdoMacFilterPopover(
+                filters: $filters,
+                categories: categories,
+                onDismissFocus: {
+                    showsFilterPopover = false
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                }
+            )
+        }
+        .help(filters.hasActiveFilters ? "Filter active" : "Filter")
+        .accessibilityLabel(filters.hasActiveFilters ? "Filters Active" : "Filters")
+    }
+
+    private var quickCaptureButton: some View {
+        Button(action: onCapture) {
+            LisdoMacToolbarCircleLabel(
+                systemImage: "plus",
+                foreground: LisdoMacTheme.onAccent,
+                background: LisdoMacTheme.ink2
+            )
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("n", modifiers: [.command])
+        .focusable(false)
+        .focusEffectDisabled()
+        .help("Quick capture")
+        .accessibilityLabel("Quick Capture")
+    }
+
+    private var settingsButton: some View {
+        SettingsLink {
+            LisdoMacToolbarCircleLabel(systemImage: "gearshape")
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .focusEffectDisabled()
+        .help("Settings")
+        .accessibilityLabel("Settings")
+    }
+}
+
+private struct LisdoMacSearchToolbarControl: View {
+    @Binding var text: String
+    @Binding var isExpanded: Bool
+    @FocusState private var isSearchFocused: Bool
+
+    var body: some View {
+        Group {
+            if isExpanded {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(LisdoMacTheme.ink3)
+
+                    TextField("Search captures, drafts, todos", text: $text)
+                        .textFieldStyle(.plain)
+                        .focused($isSearchFocused)
+                        .frame(width: 230)
+
+                    if !text.isEmpty {
+                        Button {
+                            text = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(LisdoMacTheme.ink4)
+                        }
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        .focusEffectDisabled()
+                        .help("Clear search")
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .background(LisdoMacTheme.surface2, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(LisdoMacTheme.divider.opacity(0.82))
+                }
+                .onAppear {
+                    isSearchFocused = true
+                }
+            } else {
+                Button {
+                    isExpanded = true
+                } label: {
+                    LisdoMacToolbarCircleLabel(systemImage: "magnifyingglass")
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .focusEffectDisabled()
+                .help("Search")
+                .accessibilityLabel("Search")
+            }
+        }
+        .onChange(of: isSearchFocused) { _, isFocused in
+            if !isFocused && text.lisdoTrimmed.isEmpty {
+                isExpanded = false
+            }
+        }
+    }
+}
+
+private struct LisdoMacToolbarCircleLabel: View {
+    let systemImage: String
+    var foreground: Color = LisdoMacTheme.ink2
+    var background: Color = LisdoMacTheme.surface2
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(foreground)
+            .frame(width: 38, height: 38)
+            .background(background, in: Circle())
+            .overlay {
+                Circle()
+                    .strokeBorder(LisdoMacTheme.divider.opacity(0.78))
+            }
+            .contentShape(Circle())
+            .accessibilityHidden(true)
     }
 }
 
@@ -380,6 +461,7 @@ private struct LisdoMacSearchFilters: Equatable {
 private struct LisdoMacFilterPopover: View {
     @Binding var filters: LisdoMacSearchFilters
     let categories: [Category]
+    let onDismissFocus: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -389,7 +471,11 @@ private struct LisdoMacFilterPopover: View {
                 Spacer()
                 Button("Clear") {
                     filters.clear()
+                    onDismissFocus()
                 }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .focusEffectDisabled()
                 .disabled(!filters.hasActiveFilters)
             }
 
@@ -428,6 +514,8 @@ private struct LisdoMacFilterPopover: View {
         }
         .padding(14)
         .frame(width: 310)
+        .focusable(false)
+        .focusEffectDisabled()
     }
 
     @ViewBuilder
@@ -446,11 +534,13 @@ private struct LisdoMacFilterPopover: View {
             Menu {
                 Button("Any") {
                     selection.wrappedValue = nil
+                    onDismissFocus()
                 }
                 Divider()
                 ForEach(values, id: \.self) { value in
                     Button(label(value)) {
                         selection.wrappedValue = value
+                        onDismissFocus()
                     }
                 }
             } label: {
@@ -472,6 +562,9 @@ private struct LisdoMacFilterPopover: View {
                 )
             }
             .menuStyle(.borderlessButton)
+            .buttonStyle(.plain)
+            .focusable(false)
+            .focusEffectDisabled()
         }
     }
 
@@ -488,104 +581,5 @@ private struct LisdoMacFilterPopover: View {
             result.append(character)
         }
         .capitalized
-    }
-}
-
-private struct LisdoToolbarSearchControl: View {
-    @Binding var searchText: String
-    @Binding var isExpanded: Bool
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        Group {
-            if isExpanded {
-                HStack(spacing: 7) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-
-                    TextField("Search captures, drafts, todos", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .focused($isFocused)
-                        .frame(width: 260)
-                        .onSubmit {
-                            isFocused = true
-                        }
-
-                    Button {
-                        if searchText.isEmpty {
-                            closeSearch()
-                        } else {
-                            searchText = ""
-                        }
-                    } label: {
-                        Image(systemName: searchText.isEmpty ? "xmark" : "xmark.circle.fill")
-                            .font(.caption.weight(.semibold))
-                            .frame(width: 18, height: 18)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help(searchText.isEmpty ? "Close Search" : "Clear Search")
-                }
-                .font(.callout)
-                .padding(.horizontal, 10)
-                .frame(height: 34)
-                .lisdoGlassSurface(cornerRadius: 17, interactive: true)
-                .transition(.scale(scale: 0.92, anchor: .trailing).combined(with: .opacity))
-                .onAppear {
-                    focusSearchField()
-                }
-                .onChange(of: isExpanded) { _, expanded in
-                    if expanded {
-                        focusSearchField()
-                    } else {
-                        isFocused = false
-                    }
-                }
-                .onExitCommand {
-                    closeSearch()
-                }
-            } else {
-                Button {
-                    withAnimation(.snappy(duration: 0.2)) {
-                        isExpanded = true
-                    }
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(searchText.isEmpty ? LisdoMacTheme.ink1 : LisdoMacTheme.info)
-                        .frame(width: 34, height: 34)
-                        .contentShape(Circle())
-                        .overlay(alignment: .topTrailing) {
-                            if !searchText.isEmpty {
-                                Circle()
-                                    .fill(LisdoMacTheme.info)
-                                    .frame(width: 6, height: 6)
-                                    .padding(5)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .lisdoGlassSurface(
-                    cornerRadius: 17,
-                    tint: searchText.isEmpty ? nil : LisdoMacTheme.info.opacity(0.14),
-                    interactive: true
-                )
-                .help(searchText.isEmpty ? "Search" : "Search active")
-                .accessibilityLabel(searchText.isEmpty ? "Search" : "Search active")
-            }
-        }
-        .animation(.snappy(duration: 0.2), value: isExpanded)
-    }
-
-    private func focusSearchField() {
-        Task { @MainActor in
-            isFocused = true
-        }
-    }
-
-    private func closeSearch() {
-        withAnimation(.snappy(duration: 0.18)) {
-            isExpanded = false
-        }
     }
 }

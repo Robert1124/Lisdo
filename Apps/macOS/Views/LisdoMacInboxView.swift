@@ -76,7 +76,7 @@ struct LisdoInboxTriageView: View {
                             } label: {
                                 Label(isProcessingQueue ? "Processing" : "Process All", systemImage: "sparkles")
                             }
-                            .buttonStyle(.borderedProminent)
+                            .lisdoProcessAllButtonStyle()
                             .disabled(processableCaptures.isEmpty || isProcessingQueue)
                         }
 
@@ -339,31 +339,35 @@ struct LisdoExpandableDraftCard: View {
     @State private var isExpanded = false
 
     var body: some View {
-        if isExpanded {
-            LisdoDraftCard(
-                draft: draft,
-                category: category,
-                capture: capture,
-                onSave: onSave,
-                onEdit: onEdit,
-                onRevise: onRevise,
-                onDelete: onDelete
-            )
-            .transition(.opacity.combined(with: .move(edge: .top)))
-        } else {
-            LisdoCompactDraftRow(
-                draft: draft,
-                category: category,
-                capture: capture,
-                onSave: onSave,
-                onDelete: onDelete,
-                onOpen: {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        isExpanded = true
+        VStack(spacing: 0) {
+            if isExpanded {
+                LisdoDraftCard(
+                    draft: draft,
+                    category: category,
+                    capture: capture,
+                    onSave: onSave,
+                    onEdit: onEdit,
+                    onRevise: onRevise,
+                    onDelete: onDelete
+                )
+                .transition(.opacity)
+            } else {
+                LisdoCompactDraftRow(
+                    draft: draft,
+                    category: category,
+                    capture: capture,
+                    onSave: onSave,
+                    onDelete: onDelete,
+                    onOpen: {
+                        withAnimation(.snappy(duration: 0.22)) {
+                            isExpanded = true
+                        }
                     }
-                }
-            )
+                )
+                .transition(.opacity)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
@@ -759,35 +763,39 @@ struct LisdoExpandableTodoCard: View {
     @State private var isExpanded = false
 
     var body: some View {
-        if isExpanded {
-            LisdoTodoCard(
-                todo: todo,
-                category: category,
-                onToggleCompletion: onToggleCompletion,
-                onToggleBlock: onToggleBlock,
-                onEdit: onEdit,
-                onDelete: onDelete,
-                onCollapse: {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        isExpanded = false
+        VStack(spacing: 0) {
+            if isExpanded {
+                LisdoTodoCard(
+                    todo: todo,
+                    category: category,
+                    onToggleCompletion: onToggleCompletion,
+                    onToggleBlock: onToggleBlock,
+                    onEdit: onEdit,
+                    onDelete: onDelete,
+                    onCollapse: {
+                        withAnimation(.snappy(duration: 0.22)) {
+                            isExpanded = false
+                        }
                     }
-                }
-            )
-            .transition(.opacity.combined(with: .move(edge: .top)))
-        } else {
-            LisdoCompactTodoRow(
-                todo: todo,
-                category: category,
-                onOpen: {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        isExpanded = true
-                    }
-                },
-                onToggleCompletion: onToggleCompletion,
-                onEdit: onEdit,
-                onDelete: onDelete
-            )
+                )
+                .transition(.opacity)
+            } else {
+                LisdoCompactTodoRow(
+                    todo: todo,
+                    category: category,
+                    onOpen: {
+                        withAnimation(.snappy(duration: 0.22)) {
+                            isExpanded = true
+                        }
+                    },
+                    onToggleCompletion: onToggleCompletion,
+                    onEdit: onEdit,
+                    onDelete: onDelete
+                )
+                .transition(.opacity)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
@@ -810,6 +818,8 @@ private struct LisdoCompactTodoRow: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
+            .focusable(false)
+            .focusEffectDisabled()
             .disabled(onToggleCompletion == nil)
             .accessibilityLabel(todo.status == .completed ? "Reopen todo" : "Complete todo")
 
@@ -919,6 +929,8 @@ struct LisdoTodoCard: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
+            .focusable(false)
+            .focusEffectDisabled()
             .disabled(onToggleCompletion == nil)
             .accessibilityLabel(todo.status == .completed ? "Reopen todo" : "Complete todo")
 
@@ -1036,6 +1048,8 @@ private struct LisdoMacIconActionButton: View {
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
+        .focusable(false)
+        .focusEffectDisabled()
         .accessibilityLabel(accessibilityLabel)
     }
 }
@@ -1069,6 +1083,8 @@ private struct LisdoMacTodoBlockRow: View {
                 }
             }
             .buttonStyle(.plain)
+            .focusable(false)
+            .focusEffectDisabled()
             .disabled(onToggle == nil)
             .accessibilityLabel(block.checked ? "Reopen checklist item" : "Complete checklist item")
         case .bullet:
@@ -1411,9 +1427,15 @@ struct LisdoCategoryDetailView: View {
                             Button {
                                 showsCategoryEditor = true
                             } label: {
-                                Label("Edit Category", systemImage: "slider.horizontal.3")
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.callout.weight(.semibold))
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Circle())
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.plain)
+                            .lisdoGlassSurface(cornerRadius: 16, interactive: true)
+                            .focusable(false)
+                            .help("Edit Category")
                         }
                     }
 
@@ -3560,7 +3582,7 @@ struct LisdoFromIPhoneView: View {
                     } label: {
                         Label(isProcessingQueue ? "Processing" : "Process All", systemImage: "sparkles")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .lisdoProcessAllButtonStyle()
                     .disabled(isProcessingQueue || processableCount == 0)
                     .help("Lease pending captures and create reviewable drafts with Mac-only CLI.")
                 }
@@ -3689,5 +3711,12 @@ struct LisdoFromIPhoneView: View {
             await process(capture)
         }
         _ = task
+    }
+}
+
+private extension View {
+    func lisdoProcessAllButtonStyle() -> some View {
+        buttonStyle(.borderedProminent)
+            .tint(LisdoMacTheme.ink2)
     }
 }

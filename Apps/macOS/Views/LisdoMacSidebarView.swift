@@ -1,6 +1,14 @@
 import LisdoCore
 import SwiftUI
 
+private let lisdoMacSidebarSelectionTint = Color(
+    .sRGB,
+    red: 0.42,
+    green: 0.42,
+    blue: 0.43,
+    opacity: 1
+)
+
 struct LisdoMacSidebarView: View {
     @EnvironmentObject private var iCloudSyncStatusMonitor: LisdoICloudSyncStatusMonitor
 
@@ -103,6 +111,8 @@ struct LisdoMacSidebarView: View {
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(.secondary)
+                        .focusable(false)
+                        .focusEffectDisabled()
                         .help("Add Category")
                         .accessibilityLabel("Add Category")
                         .padding(.trailing, 8)
@@ -110,8 +120,19 @@ struct LisdoMacSidebarView: View {
                 }
             }
             .listStyle(.sidebar)
-            .scrollIndicators(.hidden)
+            .tint(lisdoMacSidebarSelectionTint)
+            .accentColor(lisdoMacSidebarSelectionTint)
 
+            iCloudFooter
+        }
+        .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 280)
+        .task {
+            iCloudSyncStatusMonitor.refresh()
+        }
+    }
+
+    private var iCloudFooter: some View {
+        VStack(spacing: 0) {
             Divider()
                 .opacity(0.55)
 
@@ -127,10 +148,6 @@ struct LisdoMacSidebarView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .help(iCloudSyncStatusMonitor.snapshot.detail ?? iCloudSyncStatusMonitor.snapshot.title)
-        }
-        .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 280)
-        .task {
-            iCloudSyncStatusMonitor.refresh()
         }
     }
 

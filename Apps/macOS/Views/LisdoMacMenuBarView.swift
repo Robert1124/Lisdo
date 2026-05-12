@@ -29,9 +29,11 @@ struct LisdoMenuBarCaptureView: View {
             pendingSection
             Divider()
             todaySection
+            Divider()
+            quitRow
         }
-        .frame(width: 390)
-        .background(LisdoMacTheme.surface)
+        .frame(width: 340)
+        .modifier(LisdoMenuBarGlassWindowBackground())
         .onAppear(perform: loadSyncedSettings)
         .onChange(of: syncedSettingsSnapshot) { _, _ in
             loadSyncedSettings()
@@ -51,6 +53,7 @@ struct LisdoMenuBarCaptureView: View {
                     .font(.system(size: 14, weight: .semibold))
             }
             .buttonStyle(.borderless)
+            .lisdoMenuBarNoFocusRing()
             .help("Quick capture")
 
             Button {
@@ -59,6 +62,7 @@ struct LisdoMenuBarCaptureView: View {
                 Image(systemName: "macwindow")
             }
             .buttonStyle(.borderless)
+            .lisdoMenuBarNoFocusRing()
             .help("Open Lisdo")
         }
         .padding(14)
@@ -74,6 +78,7 @@ struct LisdoMenuBarCaptureView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .lisdoMenuBarNoFocusRing()
                 .frame(maxWidth: .infinity)
                 .background(
                     isClipboardExpanded ? LisdoMacTheme.info.opacity(0.16) : Color.clear,
@@ -90,6 +95,7 @@ struct LisdoMenuBarCaptureView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .lisdoMenuBarNoFocusRing()
                 .frame(maxWidth: .infinity)
                 .disabled(isCapturingScreen || isProcessing)
                 .help(imageProcessingMode == .directLLM ? "Drag to choose a screen area, then send the image to the provider" : "Drag to choose a screen area, then run Vision OCR")
@@ -101,6 +107,7 @@ struct LisdoMenuBarCaptureView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .lisdoMenuBarNoFocusRing()
                 .frame(maxWidth: .infinity)
                 .disabled(isProcessing || isCapturingScreen || isProcessingQueue)
                 .help("Open the full capture sheet to record voice and review the transcript")
@@ -133,6 +140,7 @@ struct LisdoMenuBarCaptureView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.circle)
+                    .lisdoMenuBarNoFocusRing()
                     .disabled(quickText.lisdoTrimmed.isEmpty || isProcessing)
                     .help(isProcessing ? "Creating draft" : "Capture text as a reviewable draft")
                     .padding(10)
@@ -160,6 +168,8 @@ struct LisdoMenuBarCaptureView: View {
                         requestScreenRecordingPermission()
                     }
                     .font(.caption)
+                    .buttonStyle(.borderless)
+                    .lisdoMenuBarNoFocusRing()
                 }
                 .padding(10)
                 .background(LisdoMacTheme.surface2, in: RoundedRectangle(cornerRadius: 10))
@@ -197,6 +207,7 @@ struct LisdoMenuBarCaptureView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .lisdoMenuBarNoFocusRing()
         .help("Open the iPhone processing queue")
     }
 
@@ -230,6 +241,7 @@ struct LisdoMenuBarCaptureView: View {
                                 .frame(width: 18, height: 18)
                         }
                         .buttonStyle(.plain)
+                        .lisdoMenuBarNoFocusRing()
                         .accessibilityLabel(todo.status == .completed ? "Reopen todo" : "Complete todo")
 
                         Button {
@@ -250,11 +262,31 @@ struct LisdoMenuBarCaptureView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .lisdoMenuBarNoFocusRing()
                     }
                 }
             }
         }
         .padding(14)
+    }
+
+    private var quitRow: some View {
+        Button {
+            NSApp.terminate(nil)
+        } label: {
+            HStack {
+                Text("Quit Lisdo")
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .lisdoMenuBarNoFocusRing()
+        .help("Quit Lisdo")
     }
 
     private var pendingCaptures: [CaptureItem] {
@@ -652,6 +684,26 @@ struct LisdoMenuBarCaptureView: View {
 
     private var imageProcessingMode: LisdoImageProcessingMode {
         LisdoImageProcessingMode(rawValue: imageProcessingModeRawValue) ?? .visionOCR
+    }
+}
+
+private struct LisdoMenuBarGlassWindowBackground: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content
+                .containerBackground(.regularMaterial, for: .window)
+        } else {
+            content
+                .background(.regularMaterial)
+        }
+    }
+}
+
+private extension View {
+    func lisdoMenuBarNoFocusRing() -> some View {
+        focusable(false)
+            .focusEffectDisabled()
     }
 }
 

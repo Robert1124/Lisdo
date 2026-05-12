@@ -40,3 +40,4 @@ tmp/
 # Codex / local agent state
 .superpowers/
 .playwright-mcp/
+/Lisdo-release-secrets

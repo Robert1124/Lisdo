@@ -14,53 +14,84 @@ struct LisdoMacProviderSettingsView: View {
     @State private var model = ""
     @State private var displayName = ""
     @State private var apiKey = ""
-    @State private var status = "Provider configuration stays on this Mac. Hosted BYOK API keys sync through Keychain when available."
-    @State private var providerStatus = "Selected provider and input modes sync between iPhone and Mac."
+    @State private var status = ""
+    @State private var providerStatus = ""
     @State private var providerMode: ProviderMode = .openAICompatibleBYOK
     @State private var providerSelection: ProviderPickerSelection = .addMore
     @State private var editingMode: ProviderMode = .openAICompatibleBYOK
     @State private var cliKind: CLIProviderKind = .codex
     @State private var cliExecutablePath = ""
     @State private var cliTimeoutSeconds = 120.0
-    @State private var cliStatus = "No Mac-only CLI settings saved on this Mac."
+    @State private var cliStatus = ""
     @State private var imageProcessingModeRawValue = LisdoSyncedSettings.defaultImageProcessingModeRawValue
     @State private var voiceProcessingModeRawValue = LisdoSyncedSettings.defaultVoiceProcessingModeRawValue
     @State private var isApplyingSyncedSettings = false
-    @State private var updateStatus = "Check Lisdo's appcast for the latest signed Mac build."
+    @State private var updateStatus = ""
     @State private var isCheckingUpdates = false
     @State private var latestUpdateURL: URL?
+    @State private var selectedSettingsTab: LisdoMacSettingsTab = .capture
     @AppStorage(LisdoMacHotKeyPreferences.quickCapturePresetDefaultsKey) private var quickCaptureHotKeyPresetId = LisdoMacHotKeyPreferences.defaultQuickCapturePresetId
     @AppStorage(LisdoMacHotKeyPreferences.selectedAreaPresetDefaultsKey) private var selectedAreaHotKeyPresetId = LisdoMacHotKeyPreferences.defaultSelectedAreaPresetId
     @AppStorage(LisdoMacNotifications.hotKeyStatusDefaultsKey) private var hotKeyStatus = "Global hotkeys are not registered yet."
 
     var body: some View {
-        TabView {
-            captureSettingsTab
-                .tabItem {
-                    Label("Capture", systemImage: "tray.and.arrow.down")
-                }
+        VStack(spacing: 0) {
+            settingsTabBar
 
-            providerSettingsTab
-                .tabItem {
-                    Label("Provider", systemImage: "cpu")
-                }
+            Divider()
+                .opacity(0.55)
 
-            hotKeySettingsTab
-                .tabItem {
-                    Label("Hotkeys", systemImage: "keyboard")
-                }
-
-            aboutSettingsTab
-                .tabItem {
-                    Label("About", systemImage: "info.circle")
-                }
+            selectedSettingsContent
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(20)
         .frame(minWidth: 520, minHeight: 540)
-        .navigationTitle("Settings")
+        .background(LisdoMacTheme.surface)
         .onAppear(perform: load)
         .onChange(of: syncedSettingsSnapshot) { _, _ in
             loadSyncedSelections(updateEditingMode: false)
+        }
+    }
+
+    private var settingsTabBar: some View {
+        HStack(spacing: 8) {
+            ForEach(LisdoMacSettingsTab.allCases) { tab in
+                Button {
+                    selectedSettingsTab = tab
+                } label: {
+                    Label(tab.title, systemImage: tab.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(selectedSettingsTab == tab ? LisdoMacTheme.ink1 : LisdoMacTheme.ink3)
+                        .padding(.horizontal, 12)
+                        .frame(height: 38)
+                        .background(
+                            selectedSettingsTab == tab ? LisdoMacTheme.surface3 : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        )
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        .padding(.bottom, 12)
+    }
+
+    @ViewBuilder
+    private var selectedSettingsContent: some View {
+        switch selectedSettingsTab {
+        case .capture:
+            captureSettingsTab
+        case .provider:
+            providerSettingsTab
+        case .hotkeys:
+            hotKeySettingsTab
+        case .about:
+            aboutSettingsTab
         }
     }
 
@@ -77,21 +108,10 @@ struct LisdoMacProviderSettingsView: View {
                     saveImageProcessingModeRawValue(newValue)
                 }
 
-                Text(selectedImageProcessingMode.detailText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
                 Label("Voice uses transcript first", systemImage: "text.bubble")
                     .font(.callout.weight(.medium))
-
-                Text(selectedVoiceProcessingMode.detailText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             } header: {
                 Text("Capture input")
-            } footer: {
-                Text("Product settings for selected provider and image input sync between iPhone and Mac. Voice captures always use transcript-first processing. Output still lands as a draft for review.")
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -112,18 +132,13 @@ struct LisdoMacProviderSettingsView: View {
                     selectProvider(newSelection)
                 }
 
-                Text("Direct Mac captures and pending queue processing use this selected provider only. If it is unavailable or fails, the capture is marked failed for review. AI output remains a reviewable draft.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(providerStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !providerStatus.isEmpty {
+                    Text(providerStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Text("Provider")
-            } footer: {
-                Text("The selected provider is stored in Lisdo product settings and syncs between iPhone and Mac.")
-                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -153,13 +168,11 @@ struct LisdoMacProviderSettingsView: View {
                     }
                 }
 
-                Text(status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(providerFormatHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !status.isEmpty {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 HStack {
                     Button {
@@ -178,20 +191,16 @@ struct LisdoMacProviderSettingsView: View {
                 }
             } header: {
                 Text("Provider configuration")
-            } footer: {
-                Text("Hosted BYOK API keys sync through Keychain when available. Endpoint, model, display name, local-model keys, OAuth tokens, CLI credentials, and CLI executable paths stay local to this Mac and are not synced through iCloud.")
-                    .foregroundStyle(.secondary)
             }
 
-            Section {
-                Text(cliStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("Mac-only CLI status")
-            } footer: {
-                Text("CLI strategy, executable path, timeout, OAuth tokens, and CLI credentials remain local to this Mac. Lisdo passes captured text to the selected CLI and accepts only strict draft JSON.")
-                    .foregroundStyle(.secondary)
+            if !cliStatus.isEmpty {
+                Section {
+                    Text(cliStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Mac-only CLI status")
+                }
             }
         }
         .formStyle(.grouped)
@@ -220,10 +229,6 @@ struct LisdoMacProviderSettingsView: View {
                     notifyHotKeySettingsChanged()
                 }
 
-                Text(hotKeyStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
                 Button {
                     quickCaptureHotKeyPresetId = LisdoMacHotKeyPreferences.defaultQuickCapturePresetId
                     selectedAreaHotKeyPresetId = LisdoMacHotKeyPreferences.defaultSelectedAreaPresetId
@@ -233,9 +238,6 @@ struct LisdoMacProviderSettingsView: View {
                 }
             } header: {
                 Text("Global hotkeys")
-            } footer: {
-                Text("Quick Capture opens the simplified capture sheet. Selected Area opens the capture sheet and immediately starts region selection.")
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -262,16 +264,15 @@ struct LisdoMacProviderSettingsView: View {
                 }
             } header: {
                 Text("Lisdo")
-            } footer: {
-                Text("Version information is read from the signed app bundle.")
-                    .foregroundStyle(.secondary)
             }
 
             Section {
-                Text(updateStatus)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if !updateStatus.isEmpty {
+                    Text(updateStatus)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 HStack {
                     Button {
@@ -287,9 +288,6 @@ struct LisdoMacProviderSettingsView: View {
                 }
             } header: {
                 Text("Updates")
-            } footer: {
-                Text("Lisdo checks the appcast XML hosted at lisdo.robertw.me. No update is installed automatically from this screen.")
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -427,10 +425,10 @@ struct LisdoMacProviderSettingsView: View {
 
         if isProviderConfigured(settings.selectedProviderMode) {
             providerSelection = .provider(settings.selectedProviderMode)
-            providerStatus = "\(providerDisplayName(for: settings.selectedProviderMode)) is selected and syncs between iPhone and Mac."
+            providerStatus = ""
         } else {
             providerSelection = .addMore
-            providerStatus = "\(DraftProviderFactory.metadata(for: settings.selectedProviderMode).displayName) is selected in synced product settings. Configure it on this Mac before processing captures."
+            providerStatus = ""
         }
 
         if updateEditingMode || previousEditingMode == previousSelectedMode {
@@ -449,7 +447,7 @@ struct LisdoMacProviderSettingsView: View {
                 providerStatus = "Could not save provider: \(error.localizedDescription)"
             }
         case .addMore:
-            providerStatus = "Choose a provider format below, configure it, then click Save."
+            providerStatus = ""
             if configuredProviderModes.contains(editingMode) {
                 editingMode = firstUnconfiguredMode ?? .openAICompatibleBYOK
                 loadProviderFields()
@@ -474,7 +472,7 @@ struct LisdoMacProviderSettingsView: View {
         do {
             let settings = try syncedSettingsStore.updateImageProcessingModeRawValue(normalizedRawValue)
             applySyncedSettings(settings, updateEditingMode: false)
-            status = "Image input mode saved. Product settings sync between iPhone and Mac."
+            status = "Image input mode saved."
         } catch {
             status = "Could not save image input mode: \(error.localizedDescription)"
         }
@@ -493,7 +491,7 @@ struct LisdoMacProviderSettingsView: View {
         do {
             let settings = try syncedSettingsStore.updateVoiceProcessingModeRawValue(normalizedRawValue)
             applySyncedSettings(settings, updateEditingMode: false)
-            status = "Voice transcript mode saved. Product settings sync between iPhone and Mac."
+            status = "Voice transcript mode saved."
         } catch {
             status = "Could not save voice transcript mode: \(error.localizedDescription)"
         }
@@ -507,13 +505,11 @@ struct LisdoMacProviderSettingsView: View {
         apiKey = ""
 
         if editingMode == .macOnlyCLI {
-            status = "Configure the CLI strategy below, then save provider settings."
+            status = ""
         } else if metadata.requiresAPIKey {
-            status = hasSavedKey(for: editingMode)
-                ? "\(metadata.displayName) API key is saved in Keychain."
-                : "\(metadata.displayName) needs an API key before it can create drafts."
+            status = ""
         } else {
-            status = "\(metadata.displayName) uses a local endpoint. Add an optional key only if your server requires one."
+            status = ""
         }
     }
 
@@ -688,6 +684,41 @@ struct LisdoMacProviderSettingsView: View {
             return "Claude Code CLI"
         case .gemini:
             return "Gemini CLI"
+        }
+    }
+}
+
+private enum LisdoMacSettingsTab: String, CaseIterable, Identifiable {
+    case capture
+    case provider
+    case hotkeys
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .capture:
+            return "Capture"
+        case .provider:
+            return "Provider"
+        case .hotkeys:
+            return "Hotkeys"
+        case .about:
+            return "About"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .capture:
+            return "tray.and.arrow.down"
+        case .provider:
+            return "cpu"
+        case .hotkeys:
+            return "keyboard"
+        case .about:
+            return "info.circle"
         }
     }
 }

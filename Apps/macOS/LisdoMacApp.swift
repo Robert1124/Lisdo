@@ -29,6 +29,7 @@ struct LisdoMacApp: App {
                 .environmentObject(iCloudSyncStatusMonitor)
                 .frame(minWidth: 880, minHeight: 620)
         }
+        .windowToolbarStyle(.unified)
 
         MenuBarExtra("Lisdo", systemImage: "tray.full") {
             LisdoMenuBarCaptureView()

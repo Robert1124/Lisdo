@@ -3,24 +3,24 @@ import LisdoCore
 import SwiftUI
 
 enum LisdoMacTheme {
-    static let surface = adaptiveColor(light: 0xF8F5EF, dark: 0x15130F)
-    static let surface2 = adaptiveColor(light: 0xEFE8DD, dark: 0x201C16)
-    static let surface3 = adaptiveColor(light: 0xE4DACD, dark: 0x2A241C)
-    static let divider = adaptiveColor(light: 0xD6CBBB, dark: 0x3D352A)
-    static let ink1 = adaptiveColor(light: 0x28251F, dark: 0xF3EDE4)
-    static let ink2 = adaptiveColor(light: 0x453F36, dark: 0xDDD3C5)
-    static let ink3 = adaptiveColor(light: 0x71695E, dark: 0xB6AA9B)
-    static let ink4 = adaptiveColor(light: 0x9A9080, dark: 0x887D6F)
-    static let ink5 = adaptiveColor(light: 0xC4B9A8, dark: 0x5C5348)
-    static let ink7 = adaptiveColor(light: 0xEDE6DC, dark: 0x302920)
-    static let ok = adaptiveColor(light: 0x637160, dark: 0xA7B69D)
-    static let warn = adaptiveColor(light: 0x9A7A58, dark: 0xD3AE7B)
-    static let info = adaptiveColor(light: 0x6D7880, dark: 0xAAB5BB)
-    static let onAccent = adaptiveColor(light: 0xFFFDF8, dark: 0x15130F)
-    static let shopping = adaptiveColor(light: 0x8A7765, dark: 0xC7B199)
-    static let research = adaptiveColor(light: 0x68735F, dark: 0xAAB699)
-    static let personal = adaptiveColor(light: 0x817286, dark: 0xC3AAC8)
-    static let homeErrands = adaptiveColor(light: 0x9A9080, dark: 0xB7AB9A)
+    static let surface = adaptiveColor(light: 0xFFFFFF, dark: 0x111111)
+    static let surface2 = adaptiveColor(light: 0xFAFAFA, dark: 0x1C1C1E)
+    static let surface3 = adaptiveColor(light: 0xF2F2F2, dark: 0x2C2C2E)
+    static let divider = adaptiveColor(light: 0xE5E5E5, dark: 0x3A3A3C)
+    static let ink1 = adaptiveColor(light: 0x111111, dark: 0xF5F5F7)
+    static let ink2 = adaptiveColor(light: 0x2C2C2E, dark: 0xE5E5EA)
+    static let ink3 = adaptiveColor(light: 0x6E6E73, dark: 0xAEAEB2)
+    static let ink4 = adaptiveColor(light: 0xA1A1A6, dark: 0x8E8E93)
+    static let ink5 = adaptiveColor(light: 0xC7C7CC, dark: 0x636366)
+    static let ink7 = adaptiveColor(light: 0xEFEFEF, dark: 0x2C2C2E)
+    static let ok = adaptiveColor(light: 0x4A4A4D, dark: 0xD1D1D6)
+    static let warn = adaptiveColor(light: 0x5C5C60, dark: 0xC7C7CC)
+    static let info = adaptiveColor(light: 0x6E6E73, dark: 0xAEAEB2)
+    static let onAccent = adaptiveColor(light: 0xFFFFFF, dark: 0x111111)
+    static let shopping = adaptiveColor(light: 0x6E6E73, dark: 0xAEAEB2)
+    static let research = adaptiveColor(light: 0x6E6E73, dark: 0xAEAEB2)
+    static let personal = adaptiveColor(light: 0x6E6E73, dark: 0xAEAEB2)
+    static let homeErrands = adaptiveColor(light: 0x6E6E73, dark: 0xAEAEB2)
 
     private static func adaptiveColor(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
@@ -102,7 +102,7 @@ struct LisdoSectionHeader<Accessory: View>: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            titleBlock
+            subtitleBlock
                 .layoutPriority(1)
 
             Spacer(minLength: 12)
@@ -111,12 +111,8 @@ struct LisdoSectionHeader<Accessory: View>: View {
         }
     }
 
-    private var titleBlock: some View {
+    private var subtitleBlock: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
             if let subtitle {
                 Text(subtitle)
                     .font(.callout)
@@ -125,6 +121,7 @@ struct LisdoSectionHeader<Accessory: View>: View {
                     .truncationMode(.tail)
             }
         }
+        .accessibilityLabel(title)
     }
 }
 
