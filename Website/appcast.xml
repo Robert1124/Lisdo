@@ -45,7 +45,7 @@ Download the DMG asset from this release, open it, and drag Lisdo to Application
 AI 输出始终先进入 draft。用户审核并保存后，draft 才会变成正式 todo。Provider secrets 根据类型保存在 Keychain 或本机设置中，不写入 CloudKit records。
 
 下载本 release 中的 DMG 文件，打开后把 Lisdo 拖到 Applications 即可安装。</description>
-      <enclosure url="https://github.com/Robert1124/Lisdo/releases/download/v0.1.1/Lisdo-0.1.1.dmg" sparkle:shortVersionString="0.1.1" sparkle:version="6" length="5512897" type="application/x-apple-diskimage" sparkle:edSignature="QlnK4I2dIBdaBy7yYU/XRF1CY8tWv5//Jjs6QOYXFTWBHnOa+S9FLmiFGC9QJb10UXi9NiYG2hcr0uMCgdUCAw==" />
+      <enclosure url="https://github.com/Robert1124/Lisdo/releases/download/v0.1.1/Lisdo-0.1.1.dmg" sparkle:shortVersionString="0.1.1" sparkle:version="7" length="5568237" type="application/x-apple-diskimage" sparkle:edSignature="WnGvRp+w+0d9L4F7PG7XEqIvjNNCv/x4ec9Zd74k3GMRWIjM4ri6kVSS9+qiMM01r8vfV4YmJYr4lkjAIm4IAg==" />
     </item>
   </channel>
 </rss>
