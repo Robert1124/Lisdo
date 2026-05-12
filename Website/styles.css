@@ -201,6 +201,12 @@ button {
   background: rgba(255, 253, 248, 0.86);
 }
 
+.icon-button.dark {
+  color: var(--on-accent);
+  background: var(--ink-1);
+  border-color: var(--ink-1);
+}
+
 .icon-button.large {
   width: 54px;
   min-width: 54px;
