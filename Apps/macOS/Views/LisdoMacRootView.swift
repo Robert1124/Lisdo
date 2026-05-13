@@ -286,6 +286,16 @@ private struct LisdoMacToolbarContent: ToolbarContent {
     let onCapture: () -> Void
 
     var body: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            toolbarItems
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            toolbarItems
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             LisdoMacToolbarItemHost {
                 LisdoMacSearchToolbarControl(
