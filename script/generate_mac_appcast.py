@@ -44,6 +44,14 @@ def read_release_notes(args: argparse.Namespace) -> str | None:
     return None
 
 
+def release_notes_format(args: argparse.Namespace) -> str | None:
+    if args.release_notes_file is None:
+        return None
+    if args.release_notes_file.suffix.lower() in {".md", ".markdown"}:
+        return "markdown"
+    return None
+
+
 def build_appcast(
     *,
     version: str,
@@ -53,6 +61,7 @@ def build_appcast(
     dmg_path: Path,
     release_notes: str | None,
     ed_signature: str | None,
+    release_notes_format: str | None = None,
 ) -> ET.ElementTree:
     ET.register_namespace("sparkle", SPARKLE_NS)
 
@@ -67,7 +76,10 @@ def build_appcast(
     ET.SubElement(item, "title").text = f"Lisdo {version}"
     ET.SubElement(item, "link").text = release_url
     if release_notes:
-        ET.SubElement(item, "description").text = release_notes
+        description_attrs = {}
+        if release_notes_format == "markdown":
+            description_attrs[f"{{{SPARKLE_NS}}}format"] = "markdown"
+        ET.SubElement(item, "description", description_attrs).text = release_notes
     enclosure_attrs = {
         "url": dmg_url,
         f"{{{SPARKLE_NS}}}shortVersionString": version,
@@ -126,6 +138,7 @@ def main(argv: list[str]) -> int:
         dmg_path=args.dmg_path,
         release_notes=release_notes,
         ed_signature=args.ed_signature,
+        release_notes_format=release_notes_format(args),
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
