@@ -8,6 +8,7 @@ const copy = {
     "nav.faq": "常见问题",
     "nav.github": "GitHub",
     "nav.sponsor": "赞助",
+    "common.ok": "OK",
     "hero.title": "杂乱输入，先成草稿",
     "hero.subtitle": "Lisdo 是 iPhone 和 Mac 上的 AI task inbox。复制文字、导入截图、语音记录或从 Mac 菜单栏捕获内容，先生成草稿，再由你确认保存为分类待办。",
     "hero.primary": "看它如何工作",
@@ -104,18 +105,19 @@ const copy = {
     "plans.starterBody": "一次性托管 AI 额度，用来试用 Lisdo provider。iCloud sync 仍关闭。",
     "plans.starterPoint1": "一次性购买",
     "plans.starterPoint2": "试用 Lisdo provider 额度",
-    "plans.basicTitle": "Monthly Basic",
+    "plans.basicTitle": "Basic",
     "plans.basicBody": "Lisdo provider 额度，以及 iPhone 和 Mac 的 iCloud-backed storage。",
-    "plans.basicPoint1": "Lisdo provider with more 用量",
+    "plans.basicPoint1": "Lisdo provider with basic usage",
     "plans.basicPoint2": "Mac 和 iPhone iCloud 同步",
-    "plans.plusTitle": "Monthly Plus",
+    "plans.plusTitle": "Plus",
     "plans.plusBody": "更高的月度额度，适合更频繁地整理草稿。",
     "plans.plusPoint1": "Lisdo provider with higher 用量",
-    "plans.plusPoint2": "适合更频繁的 capture flow",
-    "plans.maxTitle": "Monthly Max",
+    "plans.plusPoint2": "iCloud sync for Mac and iPhone",
+    "plans.maxTitle": "Max",
     "plans.maxBody": "最高的 Lisdo managed AI 包含额度。",
     "plans.maxPoint1": "Lisdo provider with max 用量",
     "plans.maxPoint2": "最高月度额度，realtime-ready",
+    "plans.maxPoint3": "iCloud sync for Mac and iPhone",
     "plans.topupTitle": "Top-up Usage",
     "plans.topupBody": "为有效月费账号补充可顺延额度。每月额度会优先使用。",
     "plans.perMonth": "/mo",
@@ -135,6 +137,7 @@ const copy = {
     "plans.portalOpening": "正在打开 Stripe Billing Portal...",
     "plans.signInUnavailable": "网页 Sign in with Apple 尚未配置。请从 Lisdo app 打开此页面。",
     "plans.signInFailed": "Sign in with Apple 未完成。请重试。",
+    "plans.modalTitle": "无法继续",
     "account.title": "Personal Center",
     "account.subtitle": "管理 Lisdo 账户、额度、套餐和网页账单。",
     "account.loginTitle": "登录 Personal Center",
@@ -147,7 +150,6 @@ const copy = {
     "account.topUp": "Top up",
     "account.quotaSignedOut": "登录后查看当前额度。",
     "account.quotaEmpty": "当前没有可用 Lisdo provider 额度。",
-    "account.quotaSummary": "{remaining} remaining of {total} quota.",
     "account.topupNeedsPlan": "Top-up 需要有效月费套餐。",
     "faq.title": "常见问题",
     "faq.q1": "AI 会不会直接替我创建待办？",
@@ -266,6 +268,7 @@ const copy = {
     "nav.faq": "FAQ",
     "nav.github": "GitHub",
     "nav.sponsor": "Sponsor",
+    "common.ok": "OK",
     "hero.title": "Messy input, clear drafts",
     "hero.subtitle": "Lisdo is an AI task inbox for iPhone and Mac. Paste text, import screenshots, record voice, or capture from the Mac menu bar. AI drafts first, you approve before anything becomes a todo.",
     "hero.primary": "See how it works",
@@ -362,18 +365,19 @@ const copy = {
     "plans.starterBody": "One-time Lisdo provider quota for trying managed drafts. iCloud sync remains off.",
     "plans.starterPoint1": "One-time purchase",
     "plans.starterPoint2": "Lisdo provider trial quota",
-    "plans.basicTitle": "Monthly Basic",
+    "plans.basicTitle": "Basic",
     "plans.basicBody": "Lisdo provider quota and iCloud-backed storage for iPhone and Mac.",
-    "plans.basicPoint1": "Lisdo provider with more usage",
+    "plans.basicPoint1": "Lisdo provider with basic usage",
     "plans.basicPoint2": "iCloud sync for Mac and iPhone",
-    "plans.plusTitle": "Monthly Plus",
+    "plans.plusTitle": "Plus",
     "plans.plusBody": "More monthly quota for heavier drafting across devices.",
     "plans.plusPoint1": "Lisdo provider with higher usage",
-    "plans.plusPoint2": "iCloud sync for heavier capture flows",
-    "plans.maxTitle": "Monthly Max",
+    "plans.plusPoint2": "iCloud sync for Mac and iPhone",
+    "plans.maxTitle": "Max",
     "plans.maxBody": "Highest included quota for Lisdo managed AI.",
     "plans.maxPoint1": "Lisdo provider with max usage",
     "plans.maxPoint2": "Highest monthly quota and realtime-ready plan",
+    "plans.maxPoint3": "iCloud sync for Mac and iPhone",
     "plans.topupTitle": "Top-up Usage",
     "plans.topupBody": "Rollover quota for active monthly accounts. Monthly quota is used first.",
     "plans.perMonth": "/mo",
@@ -393,6 +397,7 @@ const copy = {
     "plans.portalOpening": "Opening Stripe Billing Portal...",
     "plans.signInUnavailable": "Web Sign in with Apple is not configured yet. Open this page from the Lisdo app.",
     "plans.signInFailed": "Sign in with Apple did not complete. Try again.",
+    "plans.modalTitle": "Unable to continue",
     "account.title": "Personal Center",
     "account.subtitle": "Manage your Lisdo account, quota, plan, and web billing in one place.",
     "account.loginTitle": "Log in to Personal Center",
@@ -405,7 +410,6 @@ const copy = {
     "account.topUp": "Top up",
     "account.quotaSignedOut": "Sign in to load your current quota.",
     "account.quotaEmpty": "No Lisdo provider quota is active.",
-    "account.quotaSummary": "{remaining} remaining of {total} quota.",
     "account.topupNeedsPlan": "Top-up requires an active monthly plan.",
     "faq.title": "FAQ",
     "faq.q1": "Will AI create todos for me automatically?",
@@ -728,11 +732,20 @@ function escapeHTML(value) {
 
 function setCheckoutStatus(keyOrText) {
   const status = document.querySelector("[data-checkout-status]");
+  const message = copy[currentLang][keyOrText] || keyOrText;
+  if (isModalCheckoutStatus(keyOrText)) {
+    if (status) {
+      status.hidden = true;
+      status.textContent = "";
+    }
+    showCheckoutModal(message);
+    return;
+  }
   if (!status) {
     return;
   }
   status.hidden = false;
-  status.textContent = copy[currentLang][keyOrText] || keyOrText;
+  status.textContent = message;
 }
 
 function clearCheckoutStatus() {
@@ -742,6 +755,42 @@ function clearCheckoutStatus() {
   }
   status.hidden = true;
   status.textContent = "";
+}
+
+function isModalCheckoutStatus(keyOrText) {
+  return [
+    "plans.checkoutNeedsSession",
+    "plans.checkoutFailed",
+    "plans.signInUnavailable",
+    "plans.signInFailed",
+    "account.topupNeedsPlan"
+  ].includes(keyOrText);
+}
+
+function showCheckoutModal(message) {
+  const modal = document.querySelector("[data-checkout-modal]");
+  const title = document.querySelector("[data-checkout-modal-title]");
+  const body = document.querySelector("[data-checkout-modal-message]");
+  if (!modal || !title || !body) {
+    return;
+  }
+  title.textContent = copy[currentLang]["plans.modalTitle"];
+  body.textContent = message;
+  modal.hidden = false;
+  document.body.classList.add("modal-open");
+  const closeButton = modal.querySelector("[data-checkout-modal-close]");
+  if (closeButton instanceof HTMLElement) {
+    closeButton.focus();
+  }
+}
+
+function closeCheckoutModal() {
+  const modal = document.querySelector("[data-checkout-modal]");
+  if (!modal) {
+    return;
+  }
+  modal.hidden = true;
+  document.body.classList.remove("modal-open");
 }
 
 function updateWebAccountUI() {
@@ -1213,11 +1262,8 @@ function renderQuota() {
     quotaFill.style.width = `${percent}%`;
   }
   if (quotaCopy) {
-    quotaCopy.textContent = total > 0
-      ? copy[currentLang]["account.quotaSummary"]
-        .replace("{remaining}", formatNumber(remaining))
-        .replace("{total}", formatNumber(total))
-      : copy[currentLang]["account.quotaEmpty"];
+    quotaCopy.hidden = total > 0;
+    quotaCopy.textContent = total > 0 ? "" : copy[currentLang]["account.quotaEmpty"];
   }
   if (topupButton) {
     topupButton.disabled = !hasActiveMonthlyQuota();
@@ -1272,10 +1318,6 @@ function hasActiveMonthlyQuota() {
     return false;
   }
   return (quota.monthlyNonRolloverRemaining + quota.monthlyNonRolloverConsumed) > 0;
-}
-
-function formatNumber(value) {
-  return new Intl.NumberFormat(currentLang === "zh" ? "zh-CN" : "en-US").format(value);
 }
 
 async function loadGitHubReleases() {
@@ -1354,6 +1396,20 @@ if (webSignOutButton) {
 const billingPortalButton = document.querySelector("[data-billing-portal]");
 if (billingPortalButton) {
   billingPortalButton.addEventListener("click", openBillingPortal);
+}
+
+const checkoutModalCloseButton = document.querySelector("[data-checkout-modal-close]");
+if (checkoutModalCloseButton) {
+  checkoutModalCloseButton.addEventListener("click", closeCheckoutModal);
+}
+
+const checkoutModal = document.querySelector("[data-checkout-modal]");
+if (checkoutModal) {
+  checkoutModal.addEventListener("click", (event) => {
+    if (event.target === checkoutModal) {
+      closeCheckoutModal();
+    }
+  });
 }
 
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

@@ -235,7 +235,7 @@ def create_subscription_change(config: DevConfig, *, product_id: str) -> dict[st
             "quota": state.snapshot(),
         }
 
-    effective_at = _subscription_period_end(subscription)
+    effective_at = _subscription_period_end(subscription, item)
     if effective_at is None:
         raise StripeCheckoutError("Stripe subscription is missing its current period end.")
     schedule_id = _subscription_schedule_id(subscription)
@@ -255,7 +255,7 @@ def create_subscription_change(config: DevConfig, *, product_id: str) -> dict[st
                             "quantity": quantity,
                         }
                     ],
-                    "start_date": _subscription_period_start(subscription) or "now",
+                    "start_date": _subscription_period_start(subscription, item) or "now",
                     "end_date": effective_at,
                     "proration_behavior": "none",
                 },
@@ -575,12 +575,12 @@ def _subscription_item_quantity(item: Any) -> int:
     return 1
 
 
-def _subscription_period_start(subscription: Any) -> Any:
-    return _object_value(subscription, "current_period_start")
+def _subscription_period_start(subscription: Any, item: Any | None = None) -> Any:
+    return _object_value(subscription, "current_period_start") or _object_value(item, "current_period_start")
 
 
-def _subscription_period_end(subscription: Any) -> Any:
-    return _object_value(subscription, "current_period_end")
+def _subscription_period_end(subscription: Any, item: Any | None = None) -> Any:
+    return _object_value(subscription, "current_period_end") or _object_value(item, "current_period_end")
 
 
 def _subscription_schedule_id(subscription: Any) -> str | None:

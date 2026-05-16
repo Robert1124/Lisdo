@@ -1176,6 +1176,48 @@ button {
   text-align: center;
 }
 
+.checkout-modal[hidden] {
+  display: none;
+}
+
+.checkout-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(40, 37, 31, 0.34);
+  backdrop-filter: blur(16px) saturate(125%);
+}
+
+.checkout-modal-panel {
+  display: grid;
+  width: min(420px, 100%);
+  gap: 16px;
+  padding: 26px;
+  border: 1px solid rgba(40, 37, 31, 0.14);
+  border-radius: 28px;
+  background: rgba(255, 253, 248, 0.94);
+  box-shadow: 0 24px 72px rgba(40, 37, 31, 0.22);
+}
+
+.checkout-modal-panel h2 {
+  margin: 0;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  letter-spacing: 0;
+}
+
+.checkout-modal-panel p {
+  margin: 0;
+  color: var(--ink-3);
+  line-height: 1.5;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
 .account-center-section {
   max-width: 1180px;
   margin: 0 auto;

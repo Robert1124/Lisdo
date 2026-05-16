@@ -484,13 +484,13 @@ def test_stripe_subscription_downgrade_is_scheduled_for_next_period(
             {
                 "id": "sub_downgrade",
                 "status": "active",
-                "current_period_start": 1778760000,
-                "current_period_end": 1781438400,
                 "items": {
                     "data": [
                         {
                             "id": "si_downgrade",
                             "quantity": 1,
+                            "current_period_start": 1778760000,
+                            "current_period_end": 1781438400,
                             "price": {"id": "price_monthly_max"},
                         }
                     ]
