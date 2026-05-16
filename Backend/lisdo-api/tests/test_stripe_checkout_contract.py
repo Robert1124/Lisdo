@@ -17,18 +17,34 @@ class _FakeStripeSignatureError(Exception):
     pass
 
 
-def _install_fake_stripe(monkeypatch, *, webhook_events: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+class _FakeStripeObject:
+    def __init__(self, values: dict[str, Any]) -> None:
+        self._values = values
+
+    def __getitem__(self, key: str) -> Any:
+        return self._values[key]
+
+
+def _install_fake_stripe(
+    monkeypatch,
+    *,
+    webhook_events: list[dict[str, Any]] | None = None,
+    session_returns_stripe_object: bool = False,
+) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     events = list(webhook_events or [])
 
     class FakeSession:
         @staticmethod
-        def create(**kwargs: Any) -> dict[str, Any]:
+        def create(**kwargs: Any) -> dict[str, Any] | _FakeStripeObject:
             calls.append(kwargs)
-            return {
+            session = {
                 "id": "cs_test_123",
                 "url": "https://checkout.stripe.test/cs_test_123",
             }
+            if session_returns_stripe_object:
+                return _FakeStripeObject(session)
+            return session
 
     class FakePortalSession:
         @staticmethod
@@ -116,6 +132,41 @@ def test_stripe_checkout_session_uses_account_session_and_price_metadata(load_la
             "automatic_tax": {"enabled": True},
         }
     ]
+
+
+def test_stripe_checkout_session_accepts_stripe_sdk_object_response(load_lambda_handler, monkeypatch) -> None:
+    _install_fake_boto3(monkeypatch)
+    _install_fake_stripe(monkeypatch, session_returns_stripe_object=True)
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_prices={"monthlyMax": "price_monthly_max"},
+    )
+    _, auth_body = invoke(
+        handler,
+        "POST",
+        "/v1/auth/apple",
+        body={"identityToken": unsigned_apple_identity_token(subject="stripe-object-checkout-user")},
+        token=None,
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/checkout/session",
+        token=auth_body["session"]["token"],
+        body={"productId": "monthlyMax"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body == {
+        "status": "created",
+        "id": "cs_test_123",
+        "url": "https://checkout.stripe.test/cs_test_123",
+    }
 
 
 def test_stripe_topup_checkout_requires_active_monthly_plan(load_lambda_handler, monkeypatch) -> None:

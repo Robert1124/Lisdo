@@ -176,9 +176,9 @@ def handle_webhook(config: DevConfig, *, payload: bytes, signature: str | None) 
         raise StripeWebhookError("Stripe webhook signature could not be verified.") from exc
 
     event_type = _required_string(event, "type")
-    data = event.get("data")
-    obj = data.get("object") if isinstance(data, dict) else None
-    if not isinstance(obj, dict):
+    data = _object_value(event, "data")
+    obj = _object_value(data, "object")
+    if obj is None:
         raise StripeWebhookError("Stripe webhook event object is missing.")
 
     if event_type == "checkout.session.completed":
@@ -192,7 +192,7 @@ def handle_webhook(config: DevConfig, *, payload: bytes, signature: str | None) 
     }
 
 
-def _handle_checkout_completed(config: DevConfig, event_type: str, session: dict[str, Any]) -> dict[str, Any]:
+def _handle_checkout_completed(config: DevConfig, event_type: str, session: Any) -> dict[str, Any]:
     account_id = _account_id_from_object(session)
     if account_id is None:
         raise StripeWebhookError("Stripe checkout session is missing account metadata.")
@@ -236,7 +236,7 @@ def _handle_checkout_completed(config: DevConfig, event_type: str, session: dict
     }
 
 
-def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: dict[str, Any]) -> dict[str, Any]:
+def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> dict[str, Any]:
     price_id, period_end = _invoice_price_and_period_end(invoice)
     product = _product_for_price(config, price_id)
     customer_id = _required_string(invoice, "customer")
@@ -266,19 +266,19 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: dict[str, 
     }
 
 
-def _invoice_price_and_period_end(invoice: dict[str, Any]) -> tuple[str, str | None]:
-    lines = invoice.get("lines")
-    line_items = lines.get("data") if isinstance(lines, dict) else None
+def _invoice_price_and_period_end(invoice: Any) -> tuple[str, str | None]:
+    lines = _object_value(invoice, "lines")
+    line_items = _object_value(lines, "data")
     if not isinstance(line_items, list):
         raise StripeWebhookError("Stripe invoice is missing line items.")
     for line_item in line_items:
-        if not isinstance(line_item, dict):
+        if line_item is None:
             continue
-        price = line_item.get("price")
-        price_id = price.get("id") if isinstance(price, dict) else None
+        price = _object_value(line_item, "price")
+        price_id = _object_value(price, "id")
         if isinstance(price_id, str) and price_id:
-            period = line_item.get("period")
-            period_end = period.get("end") if isinstance(period, dict) else None
+            period = _object_value(line_item, "period")
+            period_end = _object_value(period, "end")
             return price_id, _unix_timestamp_to_iso(period_end)
     raise StripeWebhookError("Stripe invoice line is missing a configured price.")
 
@@ -358,32 +358,47 @@ def _secret_value(*, env_name: str, parameter_name: str | None, missing_message:
     return value
 
 
-def _metadata(obj: dict[str, Any]) -> dict[str, str]:
-    metadata = obj.get("metadata")
-    if not isinstance(metadata, dict):
+def _metadata(obj: Any) -> dict[str, str]:
+    metadata = _object_value(obj, "metadata")
+    if isinstance(metadata, dict):
+        metadata_values = metadata
+    elif hasattr(metadata, "_to_dict_recursive"):
+        metadata_values = metadata._to_dict_recursive()
+    else:
         return {}
-    return {str(key): str(value) for key, value in metadata.items() if value is not None}
+    return {str(key): str(value) for key, value in metadata_values.items() if value is not None}
 
 
-def _account_id_from_object(obj: dict[str, Any]) -> str | None:
+def _account_id_from_object(obj: Any) -> str | None:
     metadata_account_id = _metadata(obj).get("accountId")
     if metadata_account_id:
         return metadata_account_id
     return _optional_string(obj, "client_reference_id")
 
 
-def _required_string(obj: dict[str, Any], key: str) -> str:
+def _required_string(obj: Any, key: str) -> str:
     value = _optional_string(obj, key)
     if value is None:
         raise StripeWebhookError(f"Stripe object is missing {key}.")
     return value
 
 
-def _optional_string(obj: dict[str, Any], key: str) -> str | None:
-    value = obj.get(key)
+def _optional_string(obj: Any, key: str) -> str | None:
+    value = _object_value(obj, key)
     if isinstance(value, str) and value:
         return value
     return None
+
+
+def _object_value(obj: Any, key: str) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(key)
+    if obj is None:
+        return None
+    try:
+        return obj[key]
+    except (AttributeError, KeyError, TypeError):
+        return None
 
 
 def _nonempty(value: str | None) -> str | None:
