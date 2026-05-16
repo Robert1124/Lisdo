@@ -1,0 +1,32 @@
+aws_profile = "lisdo-staging"
+aws_region  = "us-east-1"
+
+project = "lisdo"
+env     = "staging"
+
+# Empty defaults to /<project>/<env>, so staging uses /lisdo/staging.
+parameter_prefix = ""
+
+# Build the Lambda zip here before plan/apply, or override this path.
+lambda_package_path = "./build/lisdo-api.zip"
+
+# Staging dev account seed. Keep Free/zero quota unless you explicitly want a
+# hosted-Lisdo smoke test before StoreKit and Sign in with Apple are wired.
+dev_plan          = "free"
+dev_monthly_quota = 0
+dev_topup_quota   = 0
+
+# Stripe web checkout. Store live/test secrets in SSM SecureString, not here:
+#   aws ssm put-parameter --name /lisdo/staging/stripe/secret-key --type SecureString --value sk_test_...
+#   aws ssm put-parameter --name /lisdo/staging/stripe/webhook-secret --type SecureString --value whsec_...
+stripe_checkout_success_url      = "https://lisdo.robertw.me/account.html?checkout=success"
+stripe_checkout_cancel_url       = "https://lisdo.robertw.me/account.html"
+stripe_billing_portal_return_url = "https://lisdo.robertw.me/account.html"
+stripe_price_starter_trial       = "price_1TXVy2DtC3pOtIXh1qs3n24D"
+stripe_price_monthly_basic       = "price_1TXVyVDtC3pOtIXhyqWYAfrU"
+stripe_price_monthly_plus        = "price_1TXVzGDtC3pOtIXhANnbaAtR"
+stripe_price_monthly_max         = "price_1TXVzmDtC3pOtIXhVwMgWl5o"
+stripe_price_top_up_usage        = "price_1TXW0ADtC3pOtIXhMY4HfRSJ"
+
+# Override locally; do not commit a production token in tfvars.
+dev_session_token = "dev-token"

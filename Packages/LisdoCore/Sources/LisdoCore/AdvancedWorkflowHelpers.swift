@@ -101,6 +101,7 @@ public enum CaptureBatchSelector {
 public enum HostedProviderQueuePolicy {
     public static let hostedProviderModes: Set<ProviderMode> = [
         .openAICompatibleBYOK,
+        .lisdoManaged,
         .minimax,
         .anthropic,
         .gemini,
@@ -113,7 +114,7 @@ public enum HostedProviderQueuePolicy {
 
     public static func supportsDirectAttachments(_ mode: ProviderMode) -> Bool {
         switch mode {
-        case .openAICompatibleBYOK, .minimax, .openRouter:
+        case .openAICompatibleBYOK, .lisdoManaged, .minimax, .openRouter:
             return true
         case .anthropic, .gemini, .macOnlyCLI, .ollama, .lmStudio, .localModel:
             return false

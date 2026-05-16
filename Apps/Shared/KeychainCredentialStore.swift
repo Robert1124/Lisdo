@@ -18,19 +18,22 @@ public struct DraftProviderLocalSettings: Codable, Equatable, Sendable {
     public var model: String
     public var displayName: String?
     public var requiresAPIKey: Bool
+    public var bearerToken: String?
 
     public init(
         mode: ProviderMode,
         endpointURL: URL? = nil,
         model: String,
         displayName: String? = nil,
-        requiresAPIKey: Bool
+        requiresAPIKey: Bool,
+        bearerToken: String? = nil
     ) {
         self.mode = mode
         self.endpointURL = endpointURL
         self.model = model
         self.displayName = displayName
         self.requiresAPIKey = requiresAPIKey
+        self.bearerToken = bearerToken
     }
 }
 
@@ -77,7 +80,7 @@ public final class KeychainCredentialStore: @unchecked Sendable {
     }
 
     public func saveOpenAICompatibleAPIKey(_ apiKey: String) throws {
-        try saveSecret(apiKey, account: Account.openAICompatibleAPIKey, synchronization: .synced)
+        try saveSecret(apiKey, account: Account.openAICompatibleAPIKey, synchronization: .local)
     }
 
     public func readOpenAICompatibleAPIKey() throws -> String? {
@@ -113,8 +116,7 @@ public final class KeychainCredentialStore: @unchecked Sendable {
     }
 
     public func saveAPIKey(_ apiKey: String, for mode: ProviderMode) throws {
-        let synchronization: KeychainSynchronization = Self.usesSynchronizableKeychain(for: mode) ? .synced : .local
-        try saveSecret(apiKey, account: Account.apiKey(for: mode), synchronization: synchronization)
+        try saveSecret(apiKey, account: Account.apiKey(for: mode), synchronization: .local)
     }
 
     public func readAPIKey(for mode: ProviderMode) throws -> String? {
@@ -241,7 +243,7 @@ public final class KeychainCredentialStore: @unchecked Sendable {
         switch mode {
         case .openAICompatibleBYOK, .minimax, .anthropic, .gemini, .openRouter:
             return true
-        case .macOnlyCLI, .ollama, .lmStudio, .localModel:
+        case .lisdoManaged, .macOnlyCLI, .ollama, .lmStudio, .localModel:
             return false
         }
     }

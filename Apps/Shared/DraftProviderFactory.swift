@@ -54,6 +54,7 @@ public final class DraftProviderFactory: @unchecked Sendable {
     public static var supportedModes: [ProviderMode] {
         [
             .openAICompatibleBYOK,
+            .lisdoManaged,
             .minimax,
             .anthropic,
             .gemini,
@@ -83,6 +84,15 @@ public final class DraftProviderFactory: @unchecked Sendable {
                 defaultEndpointURL: URL(string: "https://api.anthropic.com/v1/messages"),
                 defaultModel: "claude-3-5-haiku-latest",
                 requiresAPIKey: true,
+                isNormallyMacLocal: false
+            )
+        case .lisdoManaged:
+            return DraftProviderModeMetadata(
+                mode: mode,
+                displayName: "Lisdo",
+                defaultEndpointURL: URL(string: "https://jbreqdz8d7.execute-api.us-east-1.amazonaws.com/v1"),
+                defaultModel: "server-managed",
+                requiresAPIKey: false,
                 isNormallyMacLocal: false
             )
         case .minimax:
@@ -162,7 +172,8 @@ public final class DraftProviderFactory: @unchecked Sendable {
             endpointURL: metadata.defaultEndpointURL,
             model: metadata.defaultModel,
             displayName: metadata.displayName,
-            requiresAPIKey: metadata.requiresAPIKey
+            requiresAPIKey: metadata.requiresAPIKey,
+            bearerToken: mode == .lisdoManaged ? "dev-token" : nil
         )
     }
 
@@ -224,6 +235,26 @@ public final class DraftProviderFactory: @unchecked Sendable {
             return AnthropicDraftProvider(
                 endpointURL: endpointURL,
                 apiKey: apiKey,
+                model: settings.model,
+                displayName: settings.displayName ?? Self.metadata(for: mode).displayName,
+                urlSession: urlSession
+            )
+
+        case .lisdoManaged:
+            let settings = loadSettings(for: mode)
+            guard let endpointURL = settings.endpointURL else {
+                return nil
+            }
+
+            let bearerToken = (settings.bearerToken ?? "dev-token")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !bearerToken.isEmpty else {
+                return nil
+            }
+
+            return LisdoManagedDraftProvider(
+                baseURL: endpointURL,
+                bearerToken: bearerToken,
                 model: settings.model,
                 displayName: settings.displayName ?? Self.metadata(for: mode).displayName,
                 urlSession: urlSession

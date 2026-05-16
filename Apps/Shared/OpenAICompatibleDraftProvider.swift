@@ -7,6 +7,17 @@ public enum OpenAICompatibleDraftProviderError: Error, Equatable, Sendable {
     case missingAssistantContent
 }
 
+extension OpenAICompatibleDraftProviderError: TaskDraftProviderRetryClassifying {
+    public var taskDraftRetryClassification: TaskDraftProviderRetryClassification {
+        switch self {
+        case .httpStatus(let statusCode):
+            return TaskDraftProviderOutputRetry.isTransientHTTPStatus(statusCode) ? .retryableTransient : .nonRetryable
+        case .invalidHTTPResponse, .missingAssistantContent:
+            return .retryableTransient
+        }
+    }
+}
+
 public enum OpenAICompatibleDraftContentParsingMode: Sendable {
     case strict
     case miniMax

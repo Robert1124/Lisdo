@@ -172,6 +172,10 @@ enum LisdoMacMVP2Processing {
 
         let selectedProviderMode = providerMode(modelContext: modelContext)
 
+        guard canUseManagedProvider(mode: selectedProviderMode) else {
+            return .failedSaved(managedProviderUnavailableMessage())
+        }
+
         if (imageAttachment != nil || audioAttachment != nil), !supportsDirectAttachmentProvider(selectedProviderMode) {
             return saveFailedCaptureWithoutProvider(
                 from: payload,
@@ -395,6 +399,10 @@ enum LisdoMacMVP2Processing {
         }
 
         let selectedProviderMode = providerMode(modelContext: modelContext)
+        guard canUseManagedProvider(mode: selectedProviderMode) else {
+            return .failedSaved(managedProviderUnavailableMessage())
+        }
+
         guard let providerPlan = makeSelectedProviderPlan(mode: selectedProviderMode) else {
             return .failedSaved(noProviderMessage(startingWith: selectedProviderMode))
         }
@@ -627,11 +635,25 @@ enum LisdoMacMVP2Processing {
 
     private static func supportsDirectAttachmentProvider(_ mode: ProviderMode) -> Bool {
         switch mode {
-        case .openAICompatibleBYOK, .openRouter, .ollama, .lmStudio, .localModel, .macOnlyCLI:
+        case .openAICompatibleBYOK, .lisdoManaged, .openRouter, .ollama, .lmStudio, .localModel, .macOnlyCLI:
             return true
         case .minimax, .anthropic, .gemini:
             return false
         }
+    }
+
+    private static func canUseManagedProvider(mode: ProviderMode) -> Bool {
+        guard mode == .lisdoManaged else { return true }
+        return LisdoEntitlementStore.currentSnapshot().consumingDraftUnits(1).isAllowed
+    }
+
+    private static func managedProviderUnavailableMessage() -> String {
+        let snapshot = LisdoEntitlementStore.currentSnapshot()
+        if !snapshot.isFeatureEnabled(.lisdoManagedDrafts) {
+            return "Lisdo Managed AI needs Starter Trial or a monthly plan. BYOK and Mac-only CLI providers remain available on Free."
+        }
+
+        return "Managed usage is empty. Switch to BYOK or choose a plan with more included usage."
     }
 
     private static func isQueueProcessable(_ capture: CaptureItem) -> Bool {

@@ -211,6 +211,7 @@ struct TodoDetailSheet: View {
                             } label: {
                                 TodoDetailCheckMark(isChecked: block.checked)
                                     .frame(width: 20, height: 20)
+                                    .contentShape(Circle())
                                     .alignmentGuide(.firstTextBaseline) { dimensions in
                                         dimensions[VerticalAlignment.center] + 2
                                     }
@@ -253,6 +254,7 @@ struct TodoDetailSheet: View {
                                     .strikethrough(block.checked, color: LisdoTheme.ink4)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .disabled(block.type != .checkbox)
@@ -378,7 +380,7 @@ struct TodoDetailSheet: View {
                 openPomodoro(todo)
                 dismiss()
             } label: {
-                Label(todo.status == .inProgress ? "Open focus" : "Start focus", systemImage: "timer")
+                Label("Focus", systemImage: "timer")
             }
             .buttonStyle(LisdoTonalButtonStyle())
 

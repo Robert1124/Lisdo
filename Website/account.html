@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lisdo Personal Center</title>
+    <meta
+      name="description"
+      content="Manage your Lisdo account, quota, plan, and web billing."
+    >
+    <link rel="icon" href="assets/lisdo-logo.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="index.html#top" aria-label="Lisdo home">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/lisdo-logo.png" alt="">
+        </span>
+        <span>Lisdo</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="index.html#workflow" data-i18n="nav.workflow">Workflow</a>
+        <a href="index.html#surfaces" data-i18n="nav.surfaces">App surfaces</a>
+        <a href="index.html#plans" data-i18n="nav.plans">Plans</a>
+        <a href="/privacy.html" data-i18n="nav.privacy">Privacy</a>
+        <a href="/support.html" data-i18n="nav.support">Support</a>
+      </nav>
+
+      <div class="header-actions">
+        <div class="language-toggle" aria-label="Language">
+          <button type="button" data-lang-option="zh" aria-pressed="false">中</button>
+          <button type="button" data-lang-option="en" aria-pressed="true">EN</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="account">
+      <section class="section-pad account-center-section" data-account-center>
+        <div class="account-login-card reveal" data-account-login-gate>
+          <h1 data-i18n="account.loginTitle">Log in to Personal Center</h1>
+          <p data-i18n="account.loginBody">Use Sign in with Apple to verify your Lisdo account before managing plan, quota, or billing.</p>
+          <button class="apple-sign-in-button" type="button" data-apple-sign-in>
+            <svg viewBox="0 0 16 20" aria-hidden="true" focusable="false">
+              <path d="M13.6 10.6c0-2.2 1.8-3.2 1.9-3.3-1-1.5-2.6-1.7-3.2-1.8-1.4-.1-2.6.8-3.3.8-.7 0-1.8-.8-2.9-.8-1.5 0-2.9.9-3.7 2.2-1.6 2.8-.4 7 1.1 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3.1.7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.2-2.5 1.3-2.6-.1-.1-2.9-1.2-3-3.8ZM11.4 4.1c.6-.8 1-1.8.9-2.8-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.8-1 2.8 1 .1 2.1-.5 2.8-1.4Z"></path>
+            </svg>
+            <span data-i18n="plans.signIn">Sign in with Apple</span>
+          </button>
+        </div>
+
+        <div class="account-content" data-account-content hidden>
+        <div class="account-dashboard">
+          <section class="profile-card" data-account-auth-panel>
+            <div class="profile-card-head">
+              <button class="icon-button" type="button" data-web-sign-out hidden aria-label="Sign out">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M10 4a1 1 0 0 1 1 1v2H9V6H5v12h4v-1h2v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h6Zm6.7 4.3 3.9 3.9-3.9 3.9-1.4-1.4 1.5-1.5H9v-2h7.8l-1.5-1.5 1.4-1.4Z"></path>
+                </svg>
+              </button>
+            </div>
+
+            <div class="profile-summary">
+              <div>
+                <h2 data-profile-name data-i18n="account.signedOutName">Sign in to Lisdo</h2>
+                <p data-profile-email data-i18n="account.signedOutBody">Use your Lisdo account to sync plan and quota across devices.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="quota-card">
+            <div class="quota-card-head">
+              <div>
+                <span class="source-pill" data-i18n="account.quotaLabel">Quota</span>
+                <h2 data-quota-plan>Free</h2>
+              </div>
+              <button class="pill-button light topup-button" type="button" data-checkout-product="topUpUsage" data-i18n="account.topUp">Top up</button>
+            </div>
+            <div class="quota-meter">
+              <span data-quota-fill></span>
+            </div>
+            <p data-quota-copy data-i18n="account.quotaSignedOut">Sign in to load your current quota.</p>
+          </section>
+        </div>
+
+        <p class="checkout-status" data-checkout-status hidden></p>
+
+        <div class="plan-grid account-plan-grid">
+          <article class="plan-card" data-plan-id="starterTrial">
+            <span class="plan-kicker" data-i18n="plans.trialKicker">Trial</span>
+            <h3 data-i18n="plans.starterTitle">Starter Trial</h3>
+            <ul class="plan-points">
+              <li data-i18n="plans.starterPoint1">One-time purchase</li>
+              <li data-i18n="plans.starterPoint2">Lisdo provider trial quota</li>
+            </ul>
+            <div class="plan-price">$0.99</div>
+            <button class="pill-button dark" type="button" data-checkout-product="starterTrial" data-i18n="plans.subscribe">Subscribe</button>
+          </article>
+          <article class="plan-card featured" data-plan-id="monthlyBasic">
+            <span class="plan-kicker" data-i18n="plans.monthlyKicker">Monthly</span>
+            <h3 data-i18n="plans.basicTitle">Monthly Basic</h3>
+            <ul class="plan-points">
+              <li data-i18n="plans.basicPoint1">Lisdo provider with more usage</li>
+              <li data-i18n="plans.basicPoint2">iCloud sync for Mac and iPhone</li>
+            </ul>
+            <div class="plan-price">$4.99<span data-i18n="plans.perMonth">/mo</span></div>
+            <button class="pill-button dark" type="button" data-checkout-product="monthlyBasic" data-i18n="plans.subscribe">Subscribe</button>
+          </article>
+          <article class="plan-card" data-plan-id="monthlyPlus">
+            <span class="plan-kicker" data-i18n="plans.monthlyKicker">Monthly</span>
+            <h3 data-i18n="plans.plusTitle">Monthly Plus</h3>
+            <ul class="plan-points">
+              <li data-i18n="plans.plusPoint1">Lisdo provider with higher usage</li>
+              <li data-i18n="plans.plusPoint2">iCloud sync for heavier capture flows</li>
+            </ul>
+            <div class="plan-price">$9.99<span data-i18n="plans.perMonth">/mo</span></div>
+            <button class="pill-button dark" type="button" data-checkout-product="monthlyPlus" data-i18n="plans.subscribe">Subscribe</button>
+          </article>
+          <article class="plan-card" data-plan-id="monthlyMax">
+            <span class="plan-kicker" data-i18n="plans.monthlyKicker">Monthly</span>
+            <h3 data-i18n="plans.maxTitle">Monthly Max</h3>
+            <ul class="plan-points">
+              <li data-i18n="plans.maxPoint1">Lisdo provider with max usage</li>
+              <li data-i18n="plans.maxPoint2">Highest monthly quota and realtime-ready plan</li>
+            </ul>
+            <div class="plan-price">$14.99<span data-i18n="plans.perMonth">/mo</span></div>
+            <button class="pill-button dark" type="button" data-checkout-product="monthlyMax" data-i18n="plans.subscribe">Subscribe</button>
+          </article>
+        </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand" href="index.html#top" aria-label="Lisdo home">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/lisdo-logo.png" alt="">
+        </span>
+        <span>Lisdo</span>
+      </a>
+      <p data-i18n="footer.copy">Native AI task inbox for iPhone and Mac. Draft-first by design.</p>
+    </footer>
+
+    <script src="config.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>

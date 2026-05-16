@@ -2,6 +2,7 @@ const copy = {
   zh: {
     "nav.workflow": "工作流",
     "nav.surfaces": "产品界面",
+    "nav.plans": "套餐",
     "nav.privacy": "隐私",
     "nav.support": "支持",
     "nav.faq": "常见问题",
@@ -84,6 +85,65 @@ const copy = {
     "story.title": "安静一点，但工作流要完整",
     "story.p1": "Lisdo 的动效轻盈、克制、容易理解。视觉回到原生 Apple 产品：纯净表面、近黑文字、低饱和状态色和克制阴影。",
     "story.p2": "页面避免夸张 AI 营销语言，因为 Lisdo 的价值不是炫技，而是让 messy capture 变成可检查、可同步、可执行的任务。",
+    "plans.title": "Lisdo 账户和额度",
+    "plans.subtitle": "查看四个 Lisdo plan。登录 Personal Center 后，可以管理账户、额度和订阅。",
+    "plans.accountLabel": "Lisdo account",
+    "plans.personalCenterTitle": "登录并进入 Personal Center",
+    "plans.personalCenterBody": "Personal Center 用来管理账户、额度、账单和套餐。",
+    "plans.openPersonalCenter": "Login",
+    "plans.accountSignedOutTitle": "登录 Lisdo account",
+    "plans.accountSignedOutBody": "登录后可以进入 Personal Center 管理账户、额度和套餐。",
+    "plans.accountSignedInTitle": "已登录",
+    "plans.accountSignedInBody": "网页购买会绑定到当前 Lisdo account。",
+    "plans.signIn": "Sign in with Apple",
+    "plans.manageBilling": "管理账单",
+    "plans.trialKicker": "Trial",
+    "plans.monthlyKicker": "Monthly",
+    "plans.topupKicker": "Top-up",
+    "plans.starterTitle": "Starter Trial",
+    "plans.starterBody": "一次性托管 AI 额度，用来试用 Lisdo provider。iCloud sync 仍关闭。",
+    "plans.starterPoint1": "一次性购买",
+    "plans.starterPoint2": "试用 Lisdo provider 额度",
+    "plans.basicTitle": "Monthly Basic",
+    "plans.basicBody": "Lisdo provider 额度，以及 iPhone 和 Mac 的 iCloud-backed storage。",
+    "plans.basicPoint1": "Lisdo provider with more 用量",
+    "plans.basicPoint2": "Mac 和 iPhone iCloud 同步",
+    "plans.plusTitle": "Monthly Plus",
+    "plans.plusBody": "更高的月度额度，适合更频繁地整理草稿。",
+    "plans.plusPoint1": "Lisdo provider with higher 用量",
+    "plans.plusPoint2": "适合更频繁的 capture flow",
+    "plans.maxTitle": "Monthly Max",
+    "plans.maxBody": "最高的 Lisdo managed AI 包含额度。",
+    "plans.maxPoint1": "Lisdo provider with max 用量",
+    "plans.maxPoint2": "最高月度额度，realtime-ready",
+    "plans.topupTitle": "Top-up Usage",
+    "plans.topupBody": "为有效月费账号补充可顺延额度。每月额度会优先使用。",
+    "plans.perMonth": "/mo",
+    "plans.buyTrial": "购买试用",
+    "plans.subscribe": "订阅",
+    "plans.buyTopup": "购买补充额度",
+    "plans.checkoutReady": "Lisdo account session 可用后即可购买。",
+    "plans.checkoutNeedsSession": "请先登录 Lisdo account。",
+    "plans.checkoutOpening": "正在打开 Stripe Checkout...",
+    "plans.checkoutFailed": "暂时无法打开 Checkout。请稍后再试。",
+    "plans.checkoutSuccess": "购买成功。额度会在 webhook 验证后刷新。",
+    "plans.portalOpening": "正在打开 Stripe Billing Portal...",
+    "plans.signInUnavailable": "网页 Sign in with Apple 尚未配置。请从 Lisdo app 打开此页面。",
+    "plans.signInFailed": "Sign in with Apple 未完成。请重试。",
+    "account.title": "Personal Center",
+    "account.subtitle": "管理 Lisdo 账户、额度、套餐和网页账单。",
+    "account.loginTitle": "登录 Personal Center",
+    "account.loginBody": "使用 Sign in with Apple 验证 Lisdo account 后，再管理套餐、额度和账单。",
+    "account.profileLabel": "Lisdo account",
+    "account.signedOutName": "登录 Lisdo",
+    "account.signedOutBody": "使用 Lisdo account 在多端同步套餐和额度。",
+    "account.profileLoading": "正在载入 Personal Center...",
+    "account.quotaLabel": "Quota",
+    "account.topUp": "Top up",
+    "account.quotaSignedOut": "登录后查看当前额度。",
+    "account.quotaEmpty": "当前没有可用 Lisdo provider 额度。",
+    "account.quotaSummary": "{remaining} remaining of {total} quota.",
+    "account.topupNeedsPlan": "Top-up 需要有效月费套餐。",
     "faq.title": "常见问题",
     "faq.q1": "AI 会不会直接替我创建待办？",
     "faq.a1": "不会。Lisdo 的产品流要求所有 AI 输出先成为 draft。用户 review、编辑并确认后，才保存为正式 todo。",
@@ -195,6 +255,7 @@ const copy = {
   en: {
     "nav.workflow": "Workflow",
     "nav.surfaces": "App surfaces",
+    "nav.plans": "Plans",
     "nav.privacy": "Privacy",
     "nav.support": "Support",
     "nav.faq": "FAQ",
@@ -277,6 +338,65 @@ const copy = {
     "story.title": "Quiet by design, complete in workflow",
     "story.p1": "Lisdo's motion is light, restrained, and easy to understand. The visuals stay close to a native Apple product: clean surfaces, near-black ink, low-saturation status colors, and restrained shadows.",
     "story.p2": "The page avoids hype-heavy AI language because Lisdo's value is not spectacle. It turns messy capture into reviewable, syncable, actionable tasks.",
+    "plans.title": "Lisdo account and quota",
+    "plans.subtitle": "Compare the four Lisdo plans. Log in to Personal Center to manage account, quota, billing, and subscriptions.",
+    "plans.accountLabel": "Lisdo account",
+    "plans.personalCenterTitle": "Log in to your Personal Center",
+    "plans.personalCenterBody": "Personal Center is where account, quota, billing, and plan changes live.",
+    "plans.openPersonalCenter": "Login",
+    "plans.accountSignedOutTitle": "Log in to Lisdo account",
+    "plans.accountSignedOutBody": "Sign in to manage your account, quota, and plan from Personal Center.",
+    "plans.accountSignedInTitle": "Signed in",
+    "plans.accountSignedInBody": "Web purchases attach to the current Lisdo account.",
+    "plans.signIn": "Sign in with Apple",
+    "plans.manageBilling": "Manage billing",
+    "plans.trialKicker": "Trial",
+    "plans.monthlyKicker": "Monthly",
+    "plans.topupKicker": "Top-up",
+    "plans.starterTitle": "Starter Trial",
+    "plans.starterBody": "One-time Lisdo provider quota for trying managed drafts. iCloud sync remains off.",
+    "plans.starterPoint1": "One-time purchase",
+    "plans.starterPoint2": "Lisdo provider trial quota",
+    "plans.basicTitle": "Monthly Basic",
+    "plans.basicBody": "Lisdo provider quota and iCloud-backed storage for iPhone and Mac.",
+    "plans.basicPoint1": "Lisdo provider with more usage",
+    "plans.basicPoint2": "iCloud sync for Mac and iPhone",
+    "plans.plusTitle": "Monthly Plus",
+    "plans.plusBody": "More monthly quota for heavier drafting across devices.",
+    "plans.plusPoint1": "Lisdo provider with higher usage",
+    "plans.plusPoint2": "iCloud sync for heavier capture flows",
+    "plans.maxTitle": "Monthly Max",
+    "plans.maxBody": "Highest included quota for Lisdo managed AI.",
+    "plans.maxPoint1": "Lisdo provider with max usage",
+    "plans.maxPoint2": "Highest monthly quota and realtime-ready plan",
+    "plans.topupTitle": "Top-up Usage",
+    "plans.topupBody": "Rollover quota for active monthly accounts. Monthly quota is used first.",
+    "plans.perMonth": "/mo",
+    "plans.buyTrial": "Buy trial",
+    "plans.subscribe": "Subscribe",
+    "plans.buyTopup": "Buy top-up",
+    "plans.checkoutReady": "Ready when your Lisdo account session is available.",
+    "plans.checkoutNeedsSession": "Log in to your Lisdo account first.",
+    "plans.checkoutOpening": "Opening Stripe Checkout...",
+    "plans.checkoutFailed": "Checkout could not be opened right now. Try again later.",
+    "plans.checkoutSuccess": "Purchase complete. Quota refreshes after webhook verification.",
+    "plans.portalOpening": "Opening Stripe Billing Portal...",
+    "plans.signInUnavailable": "Web Sign in with Apple is not configured yet. Open this page from the Lisdo app.",
+    "plans.signInFailed": "Sign in with Apple did not complete. Try again.",
+    "account.title": "Personal Center",
+    "account.subtitle": "Manage your Lisdo account, quota, plan, and web billing in one place.",
+    "account.loginTitle": "Log in to Personal Center",
+    "account.loginBody": "Use Sign in with Apple to verify your Lisdo account before managing plan, quota, or billing.",
+    "account.profileLabel": "Lisdo account",
+    "account.signedOutName": "Sign in to Lisdo",
+    "account.signedOutBody": "Use your Lisdo account to sync plan and quota across devices.",
+    "account.profileLoading": "Loading Personal Center...",
+    "account.quotaLabel": "Quota",
+    "account.topUp": "Top up",
+    "account.quotaSignedOut": "Sign in to load your current quota.",
+    "account.quotaEmpty": "No Lisdo provider quota is active.",
+    "account.quotaSummary": "{remaining} remaining of {total} quota.",
+    "account.topupNeedsPlan": "Top-up requires an active monthly plan.",
     "faq.title": "FAQ",
     "faq.q1": "Will AI create todos for me automatically?",
     "faq.a1": "No. Lisdo requires AI output to become a draft first. The user reviews, edits, and approves before it becomes a final todo.",
@@ -450,6 +570,55 @@ let releaseState = {
   status: "idle",
   releases: []
 };
+const webConfig = resolveWebConfig();
+const webSession = {
+  token: sessionStorage.getItem("lisdoSessionToken") || "",
+  accountId: sessionStorage.getItem("lisdoAccountId") || "",
+  email: sessionStorage.getItem("lisdoAccountEmail") || "",
+  displayName: sessionStorage.getItem("lisdoAccountDisplayName") || ""
+};
+let accountState = {
+  account: null,
+  profile: null,
+  quota: null
+};
+
+function resolveWebConfig() {
+  const pageConfig = window.LISDO_WEB_CONFIG || {};
+  const query = new URLSearchParams(window.location.search);
+  const hashParams = hashSearchParams();
+  const apiBaseUrl = query.get("api") || hashParams.get("api") || pageConfig.apiBaseUrl || "";
+  const appleClientId = query.get("appleClientId") || hashParams.get("appleClientId") || pageConfig.appleClientId || "";
+  const appleRedirectURI =
+    query.get("appleRedirectURI") ||
+    hashParams.get("appleRedirectURI") ||
+    pageConfig.appleRedirectURI ||
+    new URL("account.html", window.location.href).href;
+  const incomingToken = hashParams.get("token") || hashParams.get("sessionToken") || "";
+  const incomingAccountId = hashParams.get("accountId") || "";
+  if (incomingToken) {
+    sessionStorage.setItem("lisdoSessionToken", incomingToken);
+    if (incomingAccountId) {
+      sessionStorage.setItem("lisdoAccountId", incomingAccountId);
+    }
+    const cleanHash = document.querySelector("[data-account-center]") ? "#account" : "#plans";
+    history.replaceState({}, "", `${window.location.pathname}${window.location.search}${cleanHash}`);
+  }
+  return {
+    apiBaseUrl: String(apiBaseUrl).replace(/\/+$/, ""),
+    appleClientId: String(appleClientId),
+    appleRedirectURI: String(appleRedirectURI)
+  };
+}
+
+function hashSearchParams() {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash) {
+    return new URLSearchParams();
+  }
+  const queryLike = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : hash;
+  return new URLSearchParams(queryLike);
+}
 
 function applyLanguage(lang) {
   currentLang = lang;
@@ -473,6 +642,9 @@ function applyLanguage(lang) {
   if (document.querySelector(".example-kind")) {
     updateCaptureExample(currentCapture);
   }
+  updateAccountLinks();
+  updateWebAccountUI();
+  renderAccountCenter();
   renderReleases();
 }
 
@@ -552,6 +724,384 @@ function escapeHTML(value) {
   })[char]);
 }
 
+function setCheckoutStatus(keyOrText) {
+  const status = document.querySelector("[data-checkout-status]");
+  if (!status) {
+    return;
+  }
+  status.hidden = false;
+  status.textContent = copy[currentLang][keyOrText] || keyOrText;
+}
+
+function clearCheckoutStatus() {
+  const status = document.querySelector("[data-checkout-status]");
+  if (!status) {
+    return;
+  }
+  status.hidden = true;
+  status.textContent = "";
+}
+
+function updateWebAccountUI() {
+  const signedIn = isVerifiedAccount();
+  document.querySelectorAll("[data-apple-sign-in]").forEach((button) => {
+    button.hidden = signedIn;
+  });
+  document.querySelectorAll("[data-web-sign-out]").forEach((button) => {
+    button.hidden = !signedIn;
+  });
+  document.querySelectorAll("[data-billing-portal]").forEach((button) => {
+    button.hidden = !signedIn;
+  });
+}
+
+function isVerifiedAccount() {
+  return Boolean(webSession.token && accountState.account && accountState.quota);
+}
+
+async function lisdoApiPost(path, body) {
+  if (!webConfig.apiBaseUrl || !webSession.token) {
+    throw new Error("missing-session");
+  }
+  const response = await fetch(`${webConfig.apiBaseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${webSession.token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body || {})
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error((payload.error && payload.error.message) || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function lisdoApiGet(path) {
+  if (!webConfig.apiBaseUrl || !webSession.token) {
+    throw new Error("missing-session");
+  }
+  const response = await fetch(`${webConfig.apiBaseUrl}${path}`, {
+    headers: {
+      "Authorization": `Bearer ${webSession.token}`
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error((payload.error && payload.error.message) || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function startCheckout(productId) {
+  if (!webConfig.apiBaseUrl || !webSession.token) {
+    setCheckoutStatus("plans.checkoutNeedsSession");
+    return;
+  }
+  if (productId === "topUpUsage" && accountState.quota && !isActiveMonthlyPlan(accountState.quota.planId)) {
+    setCheckoutStatus("account.topupNeedsPlan");
+    return;
+  }
+  setCheckoutStatus("plans.checkoutOpening");
+  try {
+    const payload = await lisdoApiPost("/v1/stripe/checkout/session", { productId });
+    if (payload.url) {
+      window.location.assign(payload.url);
+      return;
+    }
+    throw new Error("missing checkout url");
+  } catch (error) {
+    setCheckoutStatus(error.message === "missing-session" ? "plans.checkoutNeedsSession" : "plans.checkoutFailed");
+  }
+}
+
+async function openBillingPortal() {
+  if (!webConfig.apiBaseUrl || !webSession.token) {
+    setCheckoutStatus("plans.checkoutNeedsSession");
+    return;
+  }
+  setCheckoutStatus("plans.portalOpening");
+  try {
+    const payload = await lisdoApiPost("/v1/stripe/billing-portal/session", {});
+    if (payload.url) {
+      window.location.assign(payload.url);
+      return;
+    }
+    throw new Error("missing portal url");
+  } catch (error) {
+    setCheckoutStatus(error.message === "missing-session" ? "plans.checkoutNeedsSession" : "plans.checkoutFailed");
+  }
+}
+
+function loadAppleSignInScript() {
+  return new Promise((resolve, reject) => {
+    if (window.AppleID && window.AppleID.auth) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js";
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
+async function signInWithAppleForWeb() {
+  if (!webConfig.apiBaseUrl || !webConfig.appleClientId) {
+    setCheckoutStatus("plans.signInUnavailable");
+    return;
+  }
+  try {
+    await loadAppleSignInScript();
+    window.AppleID.auth.init({
+      clientId: webConfig.appleClientId,
+      scope: "name email",
+      redirectURI: webConfig.appleRedirectURI,
+      usePopup: true
+    });
+    const result = await window.AppleID.auth.signIn();
+    const identityToken = result && result.authorization && result.authorization.id_token;
+    if (!identityToken) {
+      throw new Error("missing identity token");
+    }
+    const appleName = result && result.user && result.user.name ? result.user.name : undefined;
+    const response = await fetch(`${webConfig.apiBaseUrl}/v1/auth/apple`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identityToken, name: appleName })
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.session || !payload.session.token) {
+      throw new Error("auth failed");
+    }
+    webSession.token = payload.session.token;
+    webSession.accountId = payload.account && payload.account.id ? payload.account.id : "";
+    webSession.email = payload.account && payload.account.email ? payload.account.email : "";
+    sessionStorage.setItem("lisdoSessionToken", webSession.token);
+    if (webSession.accountId) {
+      sessionStorage.setItem("lisdoAccountId", webSession.accountId);
+    }
+    if (webSession.email) {
+      sessionStorage.setItem("lisdoAccountEmail", webSession.email);
+    }
+    updateWebAccountUI();
+    renderAccountCenter();
+    await refreshAccountCenter();
+    if (isVerifiedAccount()) {
+      clearCheckoutStatus();
+    }
+  } catch (error) {
+    setCheckoutStatus("plans.signInFailed");
+  }
+}
+
+function signOutWebAccount() {
+  webSession.token = "";
+  webSession.accountId = "";
+  webSession.email = "";
+  webSession.displayName = "";
+  accountState = { account: null, profile: null, quota: null };
+  sessionStorage.removeItem("lisdoSessionToken");
+  sessionStorage.removeItem("lisdoAccountId");
+  sessionStorage.removeItem("lisdoAccountEmail");
+  sessionStorage.removeItem("lisdoAccountDisplayName");
+  updateWebAccountUI();
+  renderAccountCenter();
+  clearCheckoutStatus();
+}
+
+function updateAccountLinks() {
+  document.querySelectorAll("[data-open-account]").forEach((link) => {
+    const productId = link.dataset.planProduct || "";
+    link.setAttribute("href", accountURL(productId));
+  });
+}
+
+function accountURL(productId) {
+  const url = new URL("account.html", window.location.href);
+  const current = new URL(window.location.href);
+  for (const key of ["api", "appleClientId", "appleRedirectURI"]) {
+    const value = current.searchParams.get(key) || hashSearchParams().get(key);
+    if (value) {
+      url.searchParams.set(key, value);
+    }
+  }
+  if (currentLang === "zh") {
+    url.searchParams.set("lang", "zh");
+  }
+  if (productId) {
+    url.searchParams.set("plan", productId);
+  }
+  return `${url.pathname}${url.search}`;
+}
+
+async function refreshAccountCenter() {
+  if (!document.querySelector("[data-account-center]")) {
+    return;
+  }
+  if (!webConfig.apiBaseUrl || !webSession.token) {
+    renderAccountCenter();
+    clearCheckoutStatus();
+    return;
+  }
+  setCheckoutStatus("account.profileLoading");
+  try {
+    const payload = await lisdoApiGet("/v1/account/profile");
+    accountState = {
+      account: payload.account || null,
+      profile: payload.profile || null,
+      quota: payload.quota || null
+    };
+    if (accountState.account && accountState.account.id) {
+      webSession.accountId = accountState.account.id;
+      sessionStorage.setItem("lisdoAccountId", webSession.accountId);
+    }
+    if (accountState.profile) {
+      webSession.email = accountState.profile.email || "";
+      webSession.displayName = accountState.profile.displayName || "";
+      syncSessionProfile();
+    }
+    updateWebAccountUI();
+    renderAccountCenter();
+    clearCheckoutStatus();
+  } catch (error) {
+    accountState = { account: null, profile: null, quota: null };
+    updateWebAccountUI();
+    renderAccountCenter();
+    setCheckoutStatus(error.message === "missing-session" ? "plans.checkoutNeedsSession" : "plans.checkoutFailed");
+  }
+}
+
+function syncSessionProfile() {
+  if (webSession.email) {
+    sessionStorage.setItem("lisdoAccountEmail", webSession.email);
+  } else {
+    sessionStorage.removeItem("lisdoAccountEmail");
+  }
+  if (webSession.displayName) {
+    sessionStorage.setItem("lisdoAccountDisplayName", webSession.displayName);
+  } else {
+    sessionStorage.removeItem("lisdoAccountDisplayName");
+  }
+}
+
+function renderAccountCenter() {
+  if (!document.querySelector("[data-account-center]")) {
+    return;
+  }
+
+  const signedIn = isVerifiedAccount();
+  const profile = accountState.profile || {
+    displayName: webSession.displayName,
+    email: webSession.email
+  };
+  const displayName = profile.displayName || emailName(profile.email) || copy[currentLang]["account.signedOutName"];
+  const profileName = document.querySelector("[data-profile-name]");
+  const profileEmail = document.querySelector("[data-profile-email]");
+  const loginGate = document.querySelector("[data-account-login-gate]");
+  const accountContent = document.querySelector("[data-account-content]");
+
+  if (loginGate) {
+    loginGate.hidden = signedIn;
+  }
+  if (accountContent) {
+    accountContent.hidden = !signedIn;
+  }
+
+  if (profileName) {
+    profileName.textContent = signedIn ? displayName : copy[currentLang]["account.signedOutName"];
+  }
+  if (profileEmail) {
+    profileEmail.textContent = signedIn
+      ? (profile.email || webSession.accountId || "")
+      : copy[currentLang]["account.signedOutBody"];
+  }
+
+  renderQuota();
+  updatePlanSelection();
+}
+
+function renderQuota() {
+  const quota = accountState.quota;
+  const quotaPlan = document.querySelector("[data-quota-plan]");
+  const quotaFill = document.querySelector("[data-quota-fill]");
+  const quotaCopy = document.querySelector("[data-quota-copy]");
+  const topupButton = document.querySelector(".topup-button");
+  const planId = quota && quota.planId ? quota.planId : "free";
+
+  if (quotaPlan) {
+    quotaPlan.textContent = planName(planId);
+  }
+  if (!quota) {
+    if (quotaFill) {
+      quotaFill.style.width = "0%";
+    }
+    if (quotaCopy) {
+      quotaCopy.textContent = copy[currentLang]["account.quotaSignedOut"];
+    }
+    if (topupButton) {
+      topupButton.disabled = true;
+    }
+    return;
+  }
+
+  const monthlyTotal = quota.monthlyNonRolloverRemaining + quota.monthlyNonRolloverConsumed;
+  const topupTotal = quota.topUpRolloverRemaining + quota.topUpRolloverConsumed;
+  const total = monthlyTotal + topupTotal;
+  const remaining = quota.monthlyNonRolloverRemaining + quota.topUpRolloverRemaining;
+  const consumed = total - remaining;
+  const percent = total > 0 ? Math.min(100, Math.max(0, (consumed / total) * 100)) : 0;
+
+  if (quotaFill) {
+    quotaFill.style.width = `${percent}%`;
+  }
+  if (quotaCopy) {
+    quotaCopy.textContent = total > 0
+      ? copy[currentLang]["account.quotaSummary"]
+        .replace("{remaining}", formatNumber(remaining))
+        .replace("{total}", formatNumber(total))
+      : copy[currentLang]["account.quotaEmpty"];
+  }
+  if (topupButton) {
+    topupButton.disabled = !isActiveMonthlyPlan(planId);
+  }
+}
+
+function updatePlanSelection() {
+  const activePlan = accountState.quota && accountState.quota.planId ? accountState.quota.planId : "";
+  const requestedPlan = new URLSearchParams(window.location.search).get("plan") || "";
+  document.querySelectorAll("[data-plan-id]").forEach((card) => {
+    card.classList.toggle("is-current", Boolean(activePlan && card.dataset.planId === activePlan));
+    card.classList.toggle("is-requested", Boolean(requestedPlan && card.dataset.planId === requestedPlan));
+  });
+}
+
+function emailName(email) {
+  return typeof email === "string" && email.includes("@") ? email.split("@", 1)[0] : "";
+}
+
+function planName(planId) {
+  const keyByPlan = {
+    free: "Free",
+    starterTrial: copy[currentLang]["plans.starterTitle"],
+    monthlyBasic: copy[currentLang]["plans.basicTitle"],
+    monthlyPlus: copy[currentLang]["plans.plusTitle"],
+    monthlyMax: copy[currentLang]["plans.maxTitle"]
+  };
+  return keyByPlan[planId] || "Free";
+}
+
+function isActiveMonthlyPlan(planId) {
+  return ["monthlyBasic", "monthlyPlus", "monthlyMax"].includes(planId);
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat(currentLang === "zh" ? "zh-CN" : "en-US").format(value);
+}
+
 async function loadGitHubReleases() {
   const list = document.querySelector("[data-release-list]");
   if (!list) {
@@ -605,6 +1155,31 @@ document.querySelectorAll(".faq-item button").forEach((button) => {
   });
 });
 
+document.querySelectorAll("[data-checkout-product]").forEach((button) => {
+  button.addEventListener("click", () => startCheckout(button.dataset.checkoutProduct));
+});
+
+document.querySelectorAll("[data-open-account]").forEach((link) => {
+  link.addEventListener("click", () => {
+    link.setAttribute("href", accountURL(link.dataset.planProduct || ""));
+  });
+});
+
+const webSignInButton = document.querySelector("[data-apple-sign-in]");
+if (webSignInButton) {
+  webSignInButton.addEventListener("click", signInWithAppleForWeb);
+}
+
+const webSignOutButton = document.querySelector("[data-web-sign-out]");
+if (webSignOutButton) {
+  webSignOutButton.addEventListener("click", signOutWebAccount);
+}
+
+const billingPortalButton = document.querySelector("[data-billing-portal]");
+if (billingPortalButton) {
+  billingPortalButton.addEventListener("click", openBillingPortal);
+}
+
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 if (prefersReducedMotion) {
   document.querySelectorAll(".reveal").forEach((node) => node.classList.add("is-visible"));
@@ -626,4 +1201,11 @@ if (prefersReducedMotion) {
 }
 
 applyLanguage(currentLang);
+updateAccountLinks();
+updateWebAccountUI();
+renderAccountCenter();
+if (new URLSearchParams(window.location.search).get("checkout") === "success" || hashSearchParams().get("checkout") === "success") {
+  setCheckoutStatus("plans.checkoutSuccess");
+}
+refreshAccountCenter();
 loadGitHubReleases();

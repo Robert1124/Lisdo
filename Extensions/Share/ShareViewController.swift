@@ -7,11 +7,13 @@ import UniformTypeIdentifiers
 import Vision
 
 final class ShareViewController: UIViewController {
+    private var didCompleteRequest = false
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
         let contentView = ShareIngestionView(extensionContext: extensionContext) { [weak self] in
-            self?.extensionContext?.completeRequest(returningItems: nil)
+            self?.finishExtension()
         }
         let hostingController = UIHostingController(rootView: contentView)
 
@@ -26,6 +28,21 @@ final class ShareViewController: UIViewController {
             hostingController.view.topAnchor.constraint(equalTo: view.topAnchor),
             hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+    }
+
+    private func finishExtension() {
+        guard !didCompleteRequest else { return }
+        didCompleteRequest = true
+
+        if let extensionContext {
+            extensionContext.completeRequest(returningItems: nil) { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.dismiss(animated: true)
+                }
+            }
+        } else {
+            dismiss(animated: true)
+        }
     }
 }
 
@@ -63,14 +80,19 @@ private struct ShareIngestionView: View {
                         message: storageError
                     )
                 }
-
-                doneButton
             }
             .padding(.horizontal, 20)
             .padding(.top, 28)
-            .padding(.bottom, 24)
+            .padding(.bottom, 104)
         }
         .background(Color(uiColor: .systemBackground))
+        .safeAreaInset(edge: .bottom) {
+            doneButton
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+                .background(Color(uiColor: .systemBackground))
+        }
         .task {
             await model.startIfNeeded()
         }
@@ -147,16 +169,18 @@ private struct ShareIngestionView: View {
 
     private var doneButton: some View {
         VStack(spacing: 10) {
-            Button(action: onDone) {
+            Button {
+                onDone()
+            } label: {
                 Text("Done")
                     .font(.system(size: 15, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
+                    .foregroundStyle(.white)
+                    .background(Color.black.opacity(model.phase.isLoading ? 0.45 : 1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .background(Color.black.opacity(model.phase.isLoading ? 0.45 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .disabled(model.phase.isLoading)
 
             Text(model.phase.footerMessage)

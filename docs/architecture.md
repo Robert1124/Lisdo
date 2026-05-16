@@ -299,7 +299,14 @@ MVP 1 default:
 
 ## Sync Architecture
 
-SwiftData + CloudKit is part of MVP 1. Do not build a local-only MVP and retrofit sync later.
+SwiftData + CloudKit remains part of the MVP 1 architecture, but storage mode is entitlement-selected at app startup.
+
+Commercial sync rule for this milestone:
+
+- Free and Starter Trial use a local persistent SwiftData container with CloudKit disabled.
+- Paid monthly plans use the CloudKit-backed SwiftData container when available.
+- If CloudKit setup fails for a paid monthly plan, the app may fall back to local persistence and must present that as a CloudKit fallback, not as the entitlement-local mode.
+- Changing the plan rebuilds the root SwiftData `ModelContainer` at runtime so the app switches between local-only and iCloud-backed storage without a restart.
 
 Synced:
 
@@ -313,6 +320,7 @@ Synced:
 Not synced:
 
 - API keys;
+- BYOK provider secrets, including OpenAI-compatible API keys;
 - CLI paths;
 - provider secrets;
 - original images by default;
@@ -334,6 +342,8 @@ MVP 2/3 will wire these targets to real capture and task data.
 ## Security And Privacy
 
 Captured text may be sent to the user's configured LLM provider when the user chooses to organize it into a draft. The UI must make BYOK provider setup clear.
+
+BYOK secrets are local-only for this milestone. New API key saves use this-device Keychain items; legacy synchronizable Keychain reads may remain as a migration fallback, but new writes must not create iCloud-synchronizable keychain entries by default.
 
 Do not:
 

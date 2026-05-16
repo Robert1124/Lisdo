@@ -1,3 +1,5 @@
+import AppKit
+import AuthenticationServices
 import LisdoCore
 import SwiftData
 import SwiftUI
@@ -5,20 +7,28 @@ import SwiftUI
 struct LisdoMacProviderSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var sparkleUpdater: LisdoMacSparkleUpdater
+    @EnvironmentObject private var iCloudSyncStatusMonitor: LisdoICloudSyncStatusMonitor
+    @EnvironmentObject private var entitlementStore: LisdoEntitlementStore
     @Query(sort: \LisdoSyncedSettings.updatedAt, order: .reverse) private var syncedSettings: [LisdoSyncedSettings]
 
     private let credentialStore = KeychainCredentialStore()
     private let preferenceStore = LisdoLocalProviderPreferenceStore()
     private let factory = DraftProviderFactory()
+    private let accountSessionService = LisdoAccountSessionService()
+    private let personalCenterURL = URL(string: "https://lisdo.robertw.me/account.html")!
 
     @State private var endpoint = ""
     @State private var model = ""
     @State private var displayName = ""
     @State private var apiKey = ""
+    @State private var bearerToken = ""
     @State private var status = ""
     @State private var providerStatus = ""
     @State private var providerMode: ProviderMode = .openAICompatibleBYOK
     @State private var providerSelection: ProviderPickerSelection = .addMore
+    @State private var suppressedProviderSelection: ProviderPickerSelection?
+    @State private var providerConfigurationVisibility: ProviderConfigurationVisibility = .viewing
+    @State private var isShowingLisdoUpgradeAlert = false
     @State private var editingMode: ProviderMode = .openAICompatibleBYOK
     @State private var cliKind: CLIProviderKind = .codex
     @State private var cliExecutablePath = ""
@@ -28,6 +38,10 @@ struct LisdoMacProviderSettingsView: View {
     @State private var voiceProcessingModeRawValue = LisdoSyncedSettings.defaultVoiceProcessingModeRawValue
     @State private var isApplyingSyncedSettings = false
     @State private var selectedSettingsTab: LisdoMacSettingsTab = .capture
+    @State private var backendRefreshStatus = ""
+    @State private var accountStatus = ""
+    @State private var isAuthenticatingLisdoAccount = false
+    @State private var isRefreshingBackend = false
     @AppStorage(LisdoMacHotKeyPreferences.quickCapturePresetDefaultsKey) private var quickCaptureHotKeyPresetId = LisdoMacHotKeyPreferences.defaultQuickCapturePresetId
     @AppStorage(LisdoMacHotKeyPreferences.selectedAreaPresetDefaultsKey) private var selectedAreaHotKeyPresetId = LisdoMacHotKeyPreferences.defaultSelectedAreaPresetId
     @AppStorage(LisdoMacNotifications.hotKeyStatusDefaultsKey) private var hotKeyStatus = "Global hotkeys are not registered yet."
@@ -45,9 +59,21 @@ struct LisdoMacProviderSettingsView: View {
         }
         .frame(minWidth: 520, minHeight: 540)
         .background(LisdoMacTheme.surface)
-        .onAppear(perform: load)
+        .onAppear {
+            load()
+            Task { await refreshLisdoBackendIfConfigured(silent: true) }
+        }
         .onChange(of: syncedSettingsSnapshot) { _, _ in
             loadSyncedSelections(updateEditingMode: false)
+        }
+        .alert("Upgrade to use Lisdo", isPresented: $isShowingLisdoUpgradeAlert) {
+            Button("Open Personal Center") {
+                openPersonalCenter()
+            }
+            Button("View Plan") { selectedSettingsTab = .plan }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Lisdo requires Starter Trial or a monthly plan. Purchase or manage your plan in Personal Center, then refresh Lisdo on this Mac.")
         }
     }
 
@@ -86,6 +112,8 @@ struct LisdoMacProviderSettingsView: View {
             captureSettingsTab
         case .provider:
             providerSettingsTab
+        case .plan:
+            planSettingsTab
         case .hotkeys:
             hotKeySettingsTab
         case .about:
@@ -112,13 +140,14 @@ struct LisdoMacProviderSettingsView: View {
                 Text("Capture input")
             }
         }
-        .formStyle(.grouped)
+        .lisdoSettingsFormSurface()
     }
 
     private var providerSettingsTab: some View {
         Form {
             Section {
                 Picker("Provider", selection: $providerSelection) {
+                    Text("Lisdo").tag(ProviderPickerSelection.provider(.lisdoManaged))
                     ForEach(configuredProviderModes, id: \.self) { mode in
                         Text(providerDisplayName(for: mode)).tag(ProviderPickerSelection.provider(mode))
                     }
@@ -126,6 +155,10 @@ struct LisdoMacProviderSettingsView: View {
                 }
                 .pickerStyle(.menu)
                 .onChange(of: providerSelection) { _, newSelection in
+                    if suppressedProviderSelection == newSelection {
+                        suppressedProviderSelection = nil
+                        return
+                    }
                     guard !isApplyingSyncedSettings else { return }
                     selectProvider(newSelection)
                 }
@@ -135,60 +168,20 @@ struct LisdoMacProviderSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            } header: {
-                Text("Provider")
-            }
 
-            Section {
-                Picker("Format", selection: $editingMode) {
-                    ForEach(DraftProviderFactory.supportedModes, id: \.self) { mode in
-                        Text(DraftProviderFactory.metadata(for: mode).displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.menu)
-                .onChange(of: editingMode) { _, _ in
-                    loadProviderFields()
-                }
-
-                if editingMode == .macOnlyCLI {
-                    cliFields
-                } else {
-                    TextField("Display name", text: $displayName)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Endpoint", text: $endpoint)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Model", text: $model)
-                        .textFieldStyle(.roundedBorder)
-
-                    if metadata.requiresAPIKey || editingMode == .localModel {
-                        SecureField(apiKeyPlaceholder, text: $apiKey)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                }
-
-                if !status.isEmpty {
+                if providerConfigurationVisibility == .viewing, !status.isEmpty {
                     Text(status)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                HStack {
-                    Button {
-                        save()
-                    } label: {
-                        Label("Save", systemImage: "key")
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Button(role: .destructive) {
-                        removeProvider(editingMode)
-                    } label: {
-                        Label("Remove", systemImage: "trash")
-                    }
-                    .disabled(!isProviderConfigured(editingMode))
-                }
+                selectedProviderActions
             } header: {
-                Text("Provider configuration")
+                Text("Provider")
+            }
+
+            if providerConfigurationVisibility.isExpanded {
+                providerConfigurationSection
             }
 
             if !cliStatus.isEmpty {
@@ -201,7 +194,278 @@ struct LisdoMacProviderSettingsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .lisdoSettingsFormSurface()
+    }
+
+    @ViewBuilder
+    private var selectedProviderActions: some View {
+        switch providerSelection {
+        case .provider(let mode):
+            VStack(alignment: .leading, spacing: 10) {
+                Text(providerSelectionDescription(for: mode))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if mode == .lisdoManaged {
+                    lisdoQuotaPreview
+                }
+
+                if providerConfigurationVisibility == .viewing {
+                    HStack {
+                        Button {
+                            beginEditingProvider(mode)
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .buttonStyle(.bordered)
+
+                        if mode != .lisdoManaged {
+                            Button(role: .destructive) {
+                                removeSelectedProvider(mode)
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+            }
+        case .addMore:
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Add a BYOK or Mac-local provider before organizing new drafts.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if providerConfigurationVisibility == .viewing {
+                    Button {
+                        beginAddingProvider()
+                    } label: {
+                        Label("Configure provider", systemImage: "plus")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+    }
+
+    private var providerConfigurationSection: some View {
+        Section {
+            if providerConfigurationVisibility == .adding {
+                Picker("Format", selection: $editingMode) {
+                    ForEach(DraftProviderFactory.supportedModes, id: \.self) { mode in
+                        Text(DraftProviderFactory.metadata(for: mode).displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                .onChange(of: editingMode) { _, _ in
+                    loadProviderFields()
+                }
+            } else {
+                LabeledContent("Format") {
+                    Text(DraftProviderFactory.metadata(for: editingMode).displayName)
+                }
+            }
+
+            Text(providerFormatHelp)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            providerConfigurationFields
+
+            if !status.isEmpty {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button {
+                    saveAndCollapseProviderConfiguration()
+                } label: {
+                    Label("Save", systemImage: "key")
+                }
+                .buttonStyle(.borderedProminent)
+
+                if editingMode != .lisdoManaged {
+                    Button(role: .destructive) {
+                        removeEditingProvider()
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!isProviderConfigured(editingMode))
+                }
+
+                Button {
+                    cancelProviderConfiguration()
+                } label: {
+                    Label("Cancel", systemImage: "xmark")
+                }
+                .buttonStyle(.bordered)
+            }
+        } header: {
+            Text("Provider configuration")
+        }
+    }
+
+    @ViewBuilder
+    private var providerConfigurationFields: some View {
+        if editingMode == .macOnlyCLI {
+            cliFields
+        } else if editingMode == .lisdoManaged {
+            LabeledContent("Provider") {
+                Text("Lisdo")
+            }
+            TextField("Endpoint", text: $endpoint)
+                .textFieldStyle(.roundedBorder)
+            TextField("Model", text: $model)
+                .textFieldStyle(.roundedBorder)
+            SecureField("Dev bearer token", text: $bearerToken)
+                .textFieldStyle(.roundedBorder)
+            Text("The Lisdo backend token is stored locally in UserDefaults for development.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            TextField("Display name", text: $displayName)
+                .textFieldStyle(.roundedBorder)
+            TextField("Endpoint", text: $endpoint)
+                .textFieldStyle(.roundedBorder)
+            TextField("Model", text: $model)
+                .textFieldStyle(.roundedBorder)
+
+            if metadata.requiresAPIKey || editingMode == .localModel {
+                SecureField(apiKeyPlaceholder, text: $apiKey)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private var lisdoQuotaPreview: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("Quota usage")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(quotaUsageLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ProgressView(value: quotaUsageFraction)
+                .tint(LisdoMacTheme.ink1)
+                .accessibilityLabel("Quota usage")
+
+            Button {
+                Task { await refreshLisdoBackendIfConfigured(silent: false) }
+            } label: {
+                Label("Refresh Lisdo", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .disabled(isRefreshingBackend)
+
+            if !backendRefreshStatus.isEmpty {
+                Text(backendRefreshStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var planSettingsTab: some View {
+        Form {
+            Section {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: accountSessionService.currentLisdoBearerToken() == nil ? "person.crop.circle.badge.plus" : "person.crop.circle.badge.checkmark")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(accountSessionService.currentLisdoBearerToken() == nil ? "Sign in to sync Lisdo plan" : "Lisdo account signed in")
+                            .font(.callout.weight(.semibold))
+                        Text(accountSessionService.currentLisdoBearerToken() == nil ? "Mac can refresh the plan and quota purchased on iPhone or assigned by the backend." : "This Mac uses the saved Lisdo backend session when refreshing quota.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                lisdoAccountActionButtons
+                            }
+                            VStack(alignment: .leading, spacing: 8) {
+                                lisdoAccountActionButtons
+                            }
+                        }
+
+                        if !accountStatus.isEmpty {
+                            Text(accountStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            } header: {
+                Text("Lisdo account")
+            }
+
+            Section {
+                Picker("Plan", selection: Binding(
+                    get: { entitlementStore.selectedTier },
+                    set: { selectPlan($0) }
+                )) {
+                    ForEach(LisdoPlanTier.allCases, id: \.self) { tier in
+                        Text(tier.lisdoDisplayName).tag(tier)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                LabeledContent("Sync") {
+                    Text(iCloudSyncStatusMonitor.snapshot.title)
+                }
+
+                LabeledContent("Lisdo") {
+                    Text(entitlementStore.snapshot.isFeatureEnabled(.lisdoManagedDrafts) ? "Enabled" : "Upgrade required")
+                }
+
+                Text(LisdoEntitlementStore.iCloudPlanChangeReloadNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Local dev plan")
+            }
+        }
+        .lisdoSettingsFormSurface()
+    }
+
+    @ViewBuilder
+    private var lisdoAccountActionButtons: some View {
+        Button {
+            openPersonalCenter()
+        } label: {
+            Label("Manage plan", systemImage: "safari")
+        }
+        .buttonStyle(.borderedProminent)
+
+        SignInWithAppleButton(.signIn) { request in
+            request.requestedScopes = [.email]
+        } onCompletion: { result in
+            beginAppleSignInAuthentication(result)
+        }
+        .signInWithAppleButtonStyle(.black)
+        .frame(width: 220, height: 38)
+        .disabled(isAuthenticatingLisdoAccount)
+
+        Button {
+            Task { await refreshLisdoBackendIfConfigured(silent: false) }
+        } label: {
+            Label("Refresh Lisdo", systemImage: "arrow.clockwise")
+        }
+        .buttonStyle(.bordered)
+        .disabled(isRefreshingBackend)
     }
 
     private var hotKeySettingsTab: some View {
@@ -238,7 +502,7 @@ struct LisdoMacProviderSettingsView: View {
                 Text("Global hotkeys")
             }
         }
-        .formStyle(.grouped)
+        .lisdoSettingsFormSurface()
     }
 
     private var aboutSettingsTab: some View {
@@ -284,7 +548,7 @@ struct LisdoMacProviderSettingsView: View {
                 Text("Updates")
             }
         }
-        .formStyle(.grouped)
+        .lisdoSettingsFormSurface()
     }
 
     private var metadata: DraftProviderModeMetadata {
@@ -313,11 +577,37 @@ struct LisdoMacProviderSettingsView: View {
     }
 
     private var configuredProviderModes: [ProviderMode] {
-        DraftProviderFactory.supportedModes.filter(isProviderConfigured)
+        DraftProviderFactory.supportedModes.filter { mode in
+            mode != .lisdoManaged && isProviderConfigured(mode)
+        }
     }
 
     private var apiKeyPlaceholder: String {
         metadata.requiresAPIKey ? "API key" : "Optional API key"
+    }
+
+    private var canUseLisdoProvider: Bool {
+        entitlementStore.effectiveSnapshot.isFeatureEnabled(.lisdoManagedDrafts)
+    }
+
+    private var quotaUsageLabel: String {
+        if entitlementStore.serverQuota != nil {
+            return "Included usage"
+        }
+
+        return canUseLisdoProvider ? "Local preview" : "Not active"
+    }
+
+    private var mockQuotaUsageFraction: Double {
+        let balance = entitlementStore.snapshot.quotaBalance
+        let monthlyUnits = balance.monthlyNonRolloverUnits
+        guard monthlyUnits > 0 else { return 0.06 }
+        let seed = (monthlyUnits % 19) + (balance.topUpRolloverUnits % 7) + 2
+        return min(0.86, max(0.1, Double(seed) / 25.0))
+    }
+
+    private var quotaUsageFraction: Double {
+        entitlementStore.serverQuota?.consumedFraction ?? mockQuotaUsageFraction
     }
 
     private var selectedImageProcessingMode: LisdoImageProcessingMode {
@@ -332,6 +622,8 @@ struct LisdoMacProviderSettingsView: View {
         switch editingMode {
         case .anthropic:
             return "Anthropic-compatible BYOK uses endpoint https://api.anthropic.com/v1/messages, header x-api-key, anthropic-version 2023-06-01, and a Messages API model such as claude-3-5-haiku-latest."
+        case .lisdoManaged:
+            return "Lisdo posts OpenAI-compatible chat requests to the staging backend and expects strict draft JSON in the response."
         case .openAICompatibleBYOK, .minimax, .openRouter, .ollama, .lmStudio, .localModel:
             return "OpenAI-compatible formats use a /chat/completions endpoint with Bearer authorization when an API key is configured."
         case .gemini:
@@ -370,6 +662,10 @@ struct LisdoMacProviderSettingsView: View {
     }
 
     private func isProviderConfigured(_ mode: ProviderMode) -> Bool {
+        if mode == .lisdoManaged {
+            return canUseLisdoProvider
+        }
+
         if mode == .macOnlyCLI {
             return preferenceStore.readMacOnlyCLISettings() != nil
         }
@@ -407,6 +703,11 @@ struct LisdoMacProviderSettingsView: View {
     }
 
     private func applySyncedSettings(_ settings: LisdoSyncedSettings, updateEditingMode: Bool) {
+        if settings.selectedProviderMode == .lisdoManaged && !canUseLisdoProvider {
+            fallbackFromUnavailableLisdo(statusMessage: "Lisdo requires Starter Trial or a monthly plan. Choose another provider or add one.")
+            return
+        }
+
         let previousSelectedMode = providerMode
         let previousEditingMode = editingMode
 
@@ -417,7 +718,7 @@ struct LisdoMacProviderSettingsView: View {
         imageProcessingModeRawValue = settings.imageProcessingModeRawValue
         voiceProcessingModeRawValue = settings.voiceProcessingModeRawValue
 
-        if isProviderConfigured(settings.selectedProviderMode) {
+        if settings.selectedProviderMode == .lisdoManaged || isProviderConfigured(settings.selectedProviderMode) {
             providerSelection = .provider(settings.selectedProviderMode)
             providerStatus = ""
         } else {
@@ -434,23 +735,103 @@ struct LisdoMacProviderSettingsView: View {
     private func selectProvider(_ selection: ProviderPickerSelection) {
         switch selection {
         case .provider(let mode):
-            do {
-                let settings = try syncedSettingsStore.updateProviderMode(mode)
-                applySyncedSettings(settings, updateEditingMode: true)
-            } catch {
-                providerStatus = "Could not save provider: \(error.localizedDescription)"
+            guard mode != .lisdoManaged || canUseLisdoProvider else {
+                promptForLisdoUpgrade()
+                return
             }
+
+            providerConfigurationVisibility = .viewing
+            updateSelectedProviderMode(mode)
         case .addMore:
-            providerStatus = ""
-            if configuredProviderModes.contains(editingMode) {
-                editingMode = firstUnconfiguredMode ?? .openAICompatibleBYOK
-                loadProviderFields()
-            }
+            beginAddingProvider()
         }
     }
 
     private var firstUnconfiguredMode: ProviderMode? {
-        DraftProviderFactory.supportedModes.first { !isProviderConfigured($0) }
+        DraftProviderFactory.supportedModes.first { mode in
+            mode != .lisdoManaged && !isProviderConfigured(mode)
+        }
+    }
+
+    @discardableResult
+    private func updateSelectedProviderMode(_ mode: ProviderMode, updateEditingMode: Bool = true) -> Bool {
+        do {
+            let settings = try syncedSettingsStore.updateProviderMode(mode)
+            applySyncedSettings(settings, updateEditingMode: updateEditingMode)
+            return true
+        } catch {
+            providerStatus = "Could not save provider: \(error.localizedDescription)"
+            restoreProviderPickerSelection()
+            return false
+        }
+    }
+
+    private func beginEditingProvider(_ mode: ProviderMode) {
+        editingMode = mode
+        loadProviderFields()
+        providerConfigurationVisibility = .editing
+    }
+
+    private func beginAddingProvider() {
+        providerStatus = ""
+        editingMode = firstUnconfiguredMode ?? .openAICompatibleBYOK
+        loadProviderFields()
+        providerConfigurationVisibility = .adding
+    }
+
+    private func cancelProviderConfiguration() {
+        providerConfigurationVisibility = .viewing
+        editingMode = providerMode
+        loadProviderFields()
+        restoreProviderPickerSelection()
+    }
+
+    private func restoreProviderPickerSelection() {
+        let restoredSelection = displayedSelectionForCurrentProvider
+        guard providerSelection != restoredSelection else { return }
+        suppressedProviderSelection = restoredSelection
+        providerSelection = restoredSelection
+    }
+
+    private var displayedSelectionForCurrentProvider: ProviderPickerSelection {
+        if providerMode == .lisdoManaged {
+            return canUseLisdoProvider ? .provider(.lisdoManaged) : .addMore
+        }
+
+        return configuredProviderModes.contains(providerMode) ? .provider(providerMode) : .addMore
+    }
+
+    private func promptForLisdoUpgrade() {
+        providerStatus = "Open Personal Center to purchase or manage a Lisdo plan, then refresh Lisdo."
+        providerConfigurationVisibility = .viewing
+        restoreProviderPickerSelection()
+        isShowingLisdoUpgradeAlert = true
+    }
+
+    private func openPersonalCenter() {
+        NSWorkspace.shared.open(personalCenterURL)
+        accountStatus = "Opened Lisdo Personal Center in your browser. Sign in there, then refresh Lisdo here."
+        providerStatus = "Opened Personal Center for Lisdo plan management."
+    }
+
+    private func fallbackFromUnavailableLisdo(statusMessage: String) {
+        let fallbackMode = configuredProviderModes.first ?? .openAICompatibleBYOK
+
+        if updateSelectedProviderMode(fallbackMode) {
+            if isProviderConfigured(fallbackMode) {
+                providerConfigurationVisibility = .viewing
+            } else {
+                providerSelection = .addMore
+                editingMode = firstUnconfiguredMode ?? .openAICompatibleBYOK
+                loadProviderFields()
+                providerConfigurationVisibility = .adding
+            }
+            providerStatus = statusMessage
+        } else {
+            providerMode = fallbackMode
+            providerSelection = configuredProviderModes.contains(fallbackMode) ? .provider(fallbackMode) : .addMore
+            providerStatus = "Lisdo is not available on Free, and the fallback provider could not be saved."
+        }
     }
 
     private func saveImageProcessingModeRawValue(_ rawValue: String) {
@@ -495,8 +876,9 @@ struct LisdoMacProviderSettingsView: View {
         let settings = factory.loadSettings(for: editingMode)
         endpoint = settings.endpointURL?.absoluteString ?? ""
         model = settings.model
-        displayName = settings.displayName ?? metadata.displayName
+        displayName = editingMode == .lisdoManaged ? "Lisdo" : settings.displayName ?? metadata.displayName
         apiKey = ""
+        bearerToken = settings.bearerToken ?? (editingMode == .lisdoManaged ? "dev-token" : "")
 
         if editingMode == .macOnlyCLI {
             status = ""
@@ -507,7 +889,84 @@ struct LisdoMacProviderSettingsView: View {
         }
     }
 
-    private func save() {
+    @MainActor
+    private func refreshLisdoBackendIfConfigured(silent: Bool) async {
+        guard !isRefreshingBackend else { return }
+
+        let settings = factory.loadSettings(for: .lisdoManaged)
+        guard let endpointURL = settings.endpointURL else {
+            if !silent {
+                backendRefreshStatus = "Add a Lisdo endpoint before refreshing."
+            }
+            return
+        }
+
+        let token = (settings.bearerToken ?? "dev-token").lisdoTrimmed
+        guard !token.isEmpty else {
+            if !silent {
+                backendRefreshStatus = "Add a Lisdo bearer token before refreshing."
+            }
+            return
+        }
+
+        isRefreshingBackend = true
+        defer { isRefreshingBackend = false }
+
+        do {
+            _ = try await entitlementStore.refreshFromBackend(baseURL: endpointURL, bearerToken: token)
+            backendRefreshStatus = ""
+        } catch {
+            if !silent {
+                backendRefreshStatus = "Lisdo refresh failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func beginAppleSignInAuthentication(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .success(let authorization):
+            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                  let identityTokenData = credential.identityToken,
+                  let identityToken = String(data: identityTokenData, encoding: .utf8)
+            else {
+                accountStatus = "Apple sign in did not return an identity token."
+                return
+            }
+            let authorizationCode = credential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) }
+            Task { await authenticateLisdoAccount(identityToken: identityToken, authorizationCode: authorizationCode) }
+        case .failure(let error):
+            accountStatus = "Apple sign in failed: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func authenticateLisdoAccount(identityToken: String, authorizationCode: String?) async {
+        guard !isAuthenticatingLisdoAccount else { return }
+        isAuthenticatingLisdoAccount = true
+        accountStatus = "Signing in to Lisdo..."
+        defer { isAuthenticatingLisdoAccount = false }
+
+        do {
+            _ = try await accountSessionService.authenticateWithApple(
+                identityToken: identityToken,
+                authorizationCode: authorizationCode
+            )
+            loadProviderFields()
+            await refreshLisdoBackendIfConfigured(silent: true)
+            accountStatus = "Signed in. Plan and quota can now refresh on this Mac."
+        } catch {
+            accountStatus = "Apple sign in failed: \(error.localizedDescription)"
+        }
+    }
+
+    @discardableResult
+    private func save() -> Bool {
+        guard editingMode != .lisdoManaged || canUseLisdoProvider else {
+            status = "Choose a plan before using Lisdo."
+            promptForLisdoUpgrade()
+            return false
+        }
+
         do {
             var savedStatus: String
 
@@ -524,20 +983,23 @@ struct LisdoMacProviderSettingsView: View {
                 let trimmedEndpoint = endpoint.lisdoTrimmed
                 guard let endpointURL = URL(string: trimmedEndpoint) else {
                     status = "Enter a valid endpoint URL."
-                    return
+                    return false
                 }
 
                 if metadata.requiresAPIKey && apiKey.lisdoTrimmed.isEmpty && !hasSavedKey(for: editingMode) {
                     status = "Add an API key before saving this provider."
-                    return
+                    return false
                 }
 
                 let settings = DraftProviderLocalSettings(
                     mode: editingMode,
                     endpointURL: endpointURL,
                     model: model.lisdoTrimmed.isEmpty ? metadata.defaultModel : model.lisdoTrimmed,
-                    displayName: displayName.lisdoTrimmed.isEmpty ? metadata.displayName : displayName.lisdoTrimmed,
-                    requiresAPIKey: metadata.requiresAPIKey
+                    displayName: editingMode == .lisdoManaged
+                        ? "Lisdo"
+                        : (displayName.lisdoTrimmed.isEmpty ? metadata.displayName : displayName.lisdoTrimmed),
+                    requiresAPIKey: metadata.requiresAPIKey,
+                    bearerToken: editingMode == .lisdoManaged ? managedBearerTokenForSaving : nil
                 )
                 try credentialStore.saveProviderSettings(settings)
 
@@ -562,12 +1024,38 @@ struct LisdoMacProviderSettingsView: View {
             let settings = try syncedSettingsStore.updateProviderMode(editingMode)
             applySyncedSettings(settings, updateEditingMode: true)
             status = savedStatus
+            return true
         } catch {
             status = "Could not save provider settings: \(error.localizedDescription)"
+            return false
         }
     }
 
+    private func saveAndCollapseProviderConfiguration() {
+        if save() {
+            providerConfigurationVisibility = .viewing
+            restoreProviderPickerSelection()
+        }
+    }
+
+    private func removeSelectedProvider(_ mode: ProviderMode) {
+        removeProvider(mode)
+        providerConfigurationVisibility = .viewing
+        restoreProviderPickerSelection()
+    }
+
+    private func removeEditingProvider() {
+        removeProvider(editingMode)
+        providerConfigurationVisibility = .viewing
+        restoreProviderPickerSelection()
+    }
+
     private func removeProvider(_ mode: ProviderMode) {
+        guard mode != .lisdoManaged else {
+            status = "Lisdo cannot be removed."
+            return
+        }
+
         let removedDisplayName = providerDisplayName(for: mode)
 
         do {
@@ -592,6 +1080,19 @@ struct LisdoMacProviderSettingsView: View {
         }
     }
 
+    private func selectPlan(_ tier: LisdoPlanTier) {
+        let nextSnapshot = entitlementStore.updateSelectedTier(tier)
+
+        if nextSnapshot.isFeatureEnabled(.lisdoManagedDrafts) {
+            providerConfigurationVisibility = .viewing
+            if updateSelectedProviderMode(.lisdoManaged) {
+                providerStatus = "Lisdo selected for this plan."
+            }
+        } else if providerMode == .lisdoManaged {
+            fallbackFromUnavailableLisdo(statusMessage: "Free uses BYOK or Mac-local providers. Add a provider to keep organizing drafts.")
+        }
+    }
+
     private func notifyHotKeySettingsChanged() {
         NotificationCenter.default.post(name: LisdoMacNotifications.hotKeysChanged, object: nil)
     }
@@ -612,7 +1113,9 @@ struct LisdoMacProviderSettingsView: View {
     private func apiKeyStorageMessage(for mode: ProviderMode) -> String {
         switch mode {
         case .openAICompatibleBYOK, .minimax, .anthropic, .gemini, .openRouter:
-            return "Hosted BYOK API key syncs through Keychain when available."
+            return "Hosted BYOK API key is saved only in this device's Keychain."
+        case .lisdoManaged:
+            return "Lisdo backend token is saved only in local settings."
         case .localModel:
             return "Local-model API key stays in this Mac's Keychain."
         case .ollama, .lmStudio, .macOnlyCLI:
@@ -621,11 +1124,36 @@ struct LisdoMacProviderSettingsView: View {
     }
 
     private func providerDisplayName(for mode: ProviderMode) -> String {
+        if mode == .lisdoManaged {
+            return "Lisdo"
+        }
+
         let savedName = factory.loadSettings(for: mode).displayName?.lisdoTrimmed
         if let savedName, !savedName.isEmpty {
             return savedName
         }
         return DraftProviderFactory.metadata(for: mode).displayName
+    }
+
+    private func providerSelectionDescription(for mode: ProviderMode) -> String {
+        if mode == .lisdoManaged {
+            return canUseLisdoProvider
+                ? "Lisdo is available on the selected plan. Drafts still open for review."
+                : "Lisdo requires Starter Trial or a monthly plan."
+        }
+
+        let modeMetadata = DraftProviderFactory.metadata(for: mode)
+        if modeMetadata.isNormallyMacLocal {
+            return "Configured locally for Mac processing."
+        }
+
+        if modeMetadata.requiresAPIKey {
+            return hasSavedKey(for: mode)
+                ? "API key is saved only in this Mac's Keychain."
+                : "Add a local API key before organizing drafts with this provider."
+        }
+
+        return "Configured locally on this Mac."
     }
 
     private func cliDescriptor(kind: CLIProviderKind, timeoutSeconds: TimeInterval) -> CLIDraftProviderDescriptor {
@@ -649,11 +1177,16 @@ struct LisdoMacProviderSettingsView: View {
             return "Gemini CLI"
         }
     }
+
+    private var managedBearerTokenForSaving: String {
+        bearerToken.lisdoTrimmed.isEmpty ? "dev-token" : bearerToken.lisdoTrimmed
+    }
 }
 
 private enum LisdoMacSettingsTab: String, CaseIterable, Identifiable {
     case capture
     case provider
+    case plan
     case hotkeys
     case about
 
@@ -665,6 +1198,8 @@ private enum LisdoMacSettingsTab: String, CaseIterable, Identifiable {
             return "Capture"
         case .provider:
             return "Provider"
+        case .plan:
+            return "Plan"
         case .hotkeys:
             return "Hotkeys"
         case .about:
@@ -678,6 +1213,8 @@ private enum LisdoMacSettingsTab: String, CaseIterable, Identifiable {
             return "tray.and.arrow.down"
         case .provider:
             return "cpu"
+        case .plan:
+            return "person.badge.key"
         case .hotkeys:
             return "keyboard"
         case .about:
@@ -689,6 +1226,24 @@ private enum LisdoMacSettingsTab: String, CaseIterable, Identifiable {
 private enum ProviderPickerSelection: Hashable {
     case provider(ProviderMode)
     case addMore
+}
+
+private enum ProviderConfigurationVisibility: Equatable {
+    case viewing
+    case editing
+    case adding
+
+    var isExpanded: Bool {
+        self != .viewing
+    }
+}
+
+private extension View {
+    func lisdoSettingsFormSurface() -> some View {
+        formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background(LisdoMacTheme.surface)
+    }
 }
 
 private struct LisdoSettingsPillToggle<Option>: View where Option: CaseIterable & Identifiable & RawRepresentable, Option.RawValue == String {

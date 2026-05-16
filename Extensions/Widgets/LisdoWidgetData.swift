@@ -477,6 +477,8 @@ private extension ProviderMode {
         switch self {
         case .openAICompatibleBYOK:
             "BYOK"
+        case .lisdoManaged:
+            "Lisdo"
         case .minimax:
             "MiniMax"
         case .anthropic:
@@ -502,7 +504,7 @@ private extension ProviderMode {
             "Waiting for Mac"
         case .ollama, .lmStudio, .localModel:
             "Queued · \(widgetStatusName)"
-        case .openAICompatibleBYOK, .minimax, .anthropic, .gemini, .openRouter:
+        case .openAICompatibleBYOK, .lisdoManaged, .minimax, .anthropic, .gemini, .openRouter:
             "Queued · \(widgetStatusName)"
         }
     }

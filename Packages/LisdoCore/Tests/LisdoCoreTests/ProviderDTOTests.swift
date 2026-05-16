@@ -2,6 +2,16 @@ import XCTest
 @testable import LisdoCore
 
 final class ProviderDTOTests: XCTestCase {
+    func testProviderModeCodableIncludesLisdoManagedRawValue() throws {
+        XCTAssertEqual(ProviderMode.lisdoManaged.rawValue, "lisdoManaged")
+
+        let encoded = try JSONEncoder().encode(ProviderMode.lisdoManaged)
+        let decoded = try JSONDecoder().decode(ProviderMode.self, from: encoded)
+
+        XCTAssertEqual(decoded, .lisdoManaged)
+        XCTAssertEqual(ProviderMode.allCases.filter { $0 == .lisdoManaged }.count, 1)
+    }
+
     func testProviderModeCodableIncludesMiniMaxRawValue() throws {
         XCTAssertEqual(ProviderMode.minimax.rawValue, "minimax")
 

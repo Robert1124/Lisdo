@@ -24,6 +24,7 @@ public enum CaptureStatus: String, Codable, CaseIterable, Sendable {
 
 public enum ProviderMode: String, Codable, CaseIterable, Sendable {
     case openAICompatibleBYOK
+    case lisdoManaged
     case minimax
     case anthropic
     case gemini

@@ -155,6 +155,140 @@ final class CLIProviderContractTests: XCTestCase {
         }
     }
 
+    func testHostedProviderPendingRetryAndStaleLeaseTransitionsForLocalQueue() throws {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let capture = CaptureItem(
+            sourceType: .shareExtension,
+            sourceText: "Review project notes",
+            createdDevice: .iPhone,
+            status: .pendingProcessing,
+            preferredProviderMode: .openAICompatibleBYOK,
+            processingError: "previous network failure"
+        )
+
+        XCTAssertTrue(capture.isHostedProcessablePending(now: now))
+        try capture.leaseForHostedProcessing(processorDeviceId: "iphone-a", now: now)
+
+        XCTAssertEqual(capture.status, .processing)
+        XCTAssertEqual(capture.assignedProcessorDeviceId, "iphone-a")
+        XCTAssertEqual(capture.processingLockDeviceId, "iphone-a")
+        XCTAssertEqual(capture.processingLockCreatedAt, now)
+        XCTAssertNil(capture.processingError)
+
+        XCTAssertFalse(capture.isHostedProcessablePending(now: now.addingTimeInterval(899), staleLockInterval: 900))
+
+        let staleNow = now.addingTimeInterval(901)
+        XCTAssertTrue(capture.isHostedProcessablePending(now: staleNow, staleLockInterval: 900))
+        try capture.leaseForHostedProcessing(processorDeviceId: "iphone-b", now: staleNow, staleLockInterval: 900)
+
+        XCTAssertEqual(capture.status, .processing)
+        XCTAssertEqual(capture.assignedProcessorDeviceId, "iphone-b")
+        XCTAssertEqual(capture.processingLockDeviceId, "iphone-b")
+        XCTAssertEqual(capture.processingLockCreatedAt, staleNow)
+
+        try capture.markHostedProcessingFailed("Provider request failed.")
+        try capture.queueForRetry()
+        XCTAssertEqual(capture.status, .retryPending)
+
+        try capture.leaseForHostedProcessing(processorDeviceId: "iphone-a", now: staleNow.addingTimeInterval(1))
+        XCTAssertEqual(capture.status, .processing)
+    }
+
+    func testHostedProviderProcessabilityRestrictsProviderModesAndTerminalStatuses() {
+        let now = Date(timeIntervalSince1970: 3_000)
+
+        for mode in HostedProviderQueuePolicy.hostedProviderModes {
+            let capture = CaptureItem(
+                sourceType: .textPaste,
+                sourceText: "Task",
+                createdDevice: .iPhone,
+                status: .pendingProcessing,
+                preferredProviderMode: mode
+            )
+            XCTAssertTrue(capture.isHostedProcessablePending(now: now), "\(mode) should be hosted-processable")
+        }
+
+        let cliCapture = CaptureItem(
+            sourceType: .textPaste,
+            sourceText: "Task",
+            createdDevice: .iPhone,
+            status: .pendingProcessing,
+            preferredProviderMode: .macOnlyCLI
+        )
+        XCTAssertFalse(cliCapture.isHostedProcessablePending(now: now))
+
+        for status in [CaptureStatus.rawCaptured, .failed, .processedDraft, .approvedTodo] {
+            let capture = CaptureItem(
+                sourceType: .textPaste,
+                sourceText: "Task",
+                createdDevice: .iPhone,
+                status: status,
+                preferredProviderMode: .openAICompatibleBYOK
+            )
+            XCTAssertFalse(capture.isHostedProcessablePending(now: now), "\(status) should not be hosted-processable")
+        }
+
+        let missingLock = CaptureItem(
+            sourceType: .textPaste,
+            sourceText: "Task",
+            createdDevice: .iPhone,
+            status: .processing,
+            preferredProviderMode: .openAICompatibleBYOK
+        )
+        XCTAssertTrue(missingLock.isHostedProcessablePending(now: now))
+    }
+
+    func testSuccessfulHostedProcessingMarksProcessedDraftWithoutCreatingTodo() throws {
+        let capture = CaptureItem(
+            sourceType: .textPaste,
+            sourceText: "Send the questionnaire to Yan.",
+            createdDevice: .iPhone,
+            status: .pendingProcessing,
+            preferredProviderMode: .lisdoManaged
+        )
+        try capture.leaseForHostedProcessing(processorDeviceId: "iphone-a", now: Date(timeIntervalSince1970: 70))
+
+        let draft = ProcessingDraft(
+            captureItemId: capture.id,
+            recommendedCategoryId: "work",
+            title: "Send questionnaire",
+            blocks: [
+                DraftBlock(type: .checkbox, content: "Send questionnaire to Yan", order: 0)
+            ],
+            generatedByProvider: "lisdo-managed"
+        )
+
+        let returnedDraft = try capture.markHostedProcessingSucceeded(with: draft)
+
+        XCTAssertTrue(returnedDraft === draft)
+        XCTAssertEqual(capture.status, .processedDraft)
+        XCTAssertNil(capture.processingLockDeviceId)
+        XCTAssertNil(capture.processingLockCreatedAt)
+        XCTAssertNil(capture.processingError)
+        XCTAssertThrowsError(try DraftApprovalConverter.convert(returnedDraft, categoryId: "work", approval: nil)) { error in
+            XCTAssertEqual(error as? DraftApprovalError, .approvalRequired)
+        }
+    }
+
+    func testHostedProcessingFailureMarksFailedWithMessageAndClearsLease() throws {
+        let capture = CaptureItem(
+            sourceType: .textPaste,
+            sourceText: "Please handle this",
+            createdDevice: .iPhone,
+            status: .processing,
+            preferredProviderMode: .openAICompatibleBYOK,
+            processingLockDeviceId: "iphone-a",
+            processingLockCreatedAt: Date(timeIntervalSince1970: 10)
+        )
+
+        try capture.markHostedProcessingFailed("Network unavailable. Check provider settings.")
+
+        XCTAssertEqual(capture.status, .failed)
+        XCTAssertEqual(capture.processingError, "Network unavailable. Check provider settings.")
+        XCTAssertNil(capture.processingLockDeviceId)
+        XCTAssertNil(capture.processingLockCreatedAt)
+    }
+
     func testTranscriptNormalizationPrefersTranscriptAndRejectsEmptyContent() throws {
         let voiceCapture = CaptureItem(
             sourceType: .voiceNote,

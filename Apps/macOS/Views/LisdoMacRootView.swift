@@ -297,29 +297,25 @@ private struct LisdoMacToolbarContent: ToolbarContent {
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            LisdoMacToolbarItemHost {
-                LisdoMacSearchToolbarControl(
-                    text: $searchText,
-                    isExpanded: $isSearchExpanded
-                )
-            }
-        }
+            HStack(spacing: 2) {
+                LisdoMacToolbarItemHost {
+                    LisdoMacSearchToolbarControl(
+                        text: $searchText,
+                        isExpanded: $isSearchExpanded
+                    )
+                }
 
-        ToolbarItem(placement: .primaryAction) {
-            LisdoMacToolbarItemHost {
-                filterButton
-            }
-        }
+                LisdoMacToolbarItemHost {
+                    filterButton
+                }
 
-        ToolbarItem(placement: .primaryAction) {
-            LisdoMacToolbarItemHost {
-                quickCaptureButton
-            }
-        }
+                LisdoMacToolbarItemHost {
+                    quickCaptureButton
+                }
 
-        ToolbarItem(placement: .primaryAction) {
-            LisdoMacToolbarItemHost {
-                settingsButton
+                LisdoMacToolbarItemHost {
+                    settingsButton
+                }
             }
         }
     }
@@ -453,8 +449,8 @@ private struct LisdoMacToolbarItemHost<Content: View>: View {
 
     var body: some View {
         content
-            .padding(.horizontal, 3)
-            .frame(minWidth: 46, minHeight: 42)
+            .padding(.horizontal, 2)
+            .frame(minWidth: 44, minHeight: 42)
     }
 }
 

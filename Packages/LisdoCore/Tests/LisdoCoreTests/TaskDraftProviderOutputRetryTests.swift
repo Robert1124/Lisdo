@@ -45,6 +45,79 @@ final class TaskDraftProviderOutputRetryTests: XCTestCase {
         }
     }
 
+    func testRetriesTransientProviderFailuresBeforeReturningSuccess() async throws {
+        let provider = SequencedRetryProvider(results: [
+            .failure(ProviderFailure(classification: .retryableTransient)),
+            .failure(ProviderFailure(classification: .retryableTransient)),
+            .success(makeDraft(title: "Recovered from transient provider failure"))
+        ])
+
+        let draft = try await TaskDraftProviderOutputRetry.generateDraft(
+            provider: provider,
+            input: makeInput(),
+            categories: [],
+            options: TaskDraftProviderOptions(model: "test"),
+            retryDelayNanoseconds: 0
+        )
+
+        XCTAssertEqual(draft.title, "Recovered from transient provider failure")
+        XCTAssertEqual(provider.attemptCount, 3)
+    }
+
+    func testRetriesTransientURLErrorBeforeReturningSuccess() async throws {
+        let provider = SequencedRetryProvider(results: [
+            .failure(URLError(.timedOut)),
+            .success(makeDraft(title: "Recovered from timeout"))
+        ])
+
+        let draft = try await TaskDraftProviderOutputRetry.generateDraft(
+            provider: provider,
+            input: makeInput(),
+            categories: [],
+            options: TaskDraftProviderOptions(model: "test"),
+            retryDelayNanoseconds: 0
+        )
+
+        XCTAssertEqual(draft.title, "Recovered from timeout")
+        XCTAssertEqual(provider.attemptCount, 2)
+    }
+
+    func testDoesNotRetryNonRetryableProviderFailures() async {
+        let provider = SequencedRetryProvider(results: [
+            .failure(ProviderFailure(classification: .nonRetryable)),
+            .success(makeDraft(title: "Should not run"))
+        ])
+
+        do {
+            _ = try await TaskDraftProviderOutputRetry.generateDraft(
+                provider: provider,
+                input: makeInput(),
+                categories: [],
+                options: TaskDraftProviderOptions(model: "test"),
+                retryDelayNanoseconds: 0
+            )
+            XCTFail("Expected non-retryable provider failure to throw immediately.")
+        } catch {
+            XCTAssertEqual(provider.attemptCount, 1)
+        }
+    }
+
+    func testHTTPRetryStatusPolicyOnlyIncludesTransientStatuses() {
+        for statusCode in [408, 429, 500, 502, 503, 504] {
+            XCTAssertTrue(
+                TaskDraftProviderOutputRetry.isTransientHTTPStatus(statusCode),
+                "Expected \(statusCode) to be retryable."
+            )
+        }
+
+        for statusCode in [400, 401, 402, 403, 404, 422] {
+            XCTAssertFalse(
+                TaskDraftProviderOutputRetry.isTransientHTTPStatus(statusCode),
+                "Expected \(statusCode) to be non-retryable."
+            )
+        }
+    }
+
     func testDoesNotRetryNonOutputFailures() async {
         let provider = SequencedRetryProvider(results: [
             .failure(NonOutputProviderFailure()),
@@ -82,6 +155,14 @@ final class TaskDraftProviderOutputRetryTests: XCTestCase {
 }
 
 private struct NonOutputProviderFailure: Error {}
+
+private struct ProviderFailure: Error, TaskDraftProviderRetryClassifying {
+    var classification: TaskDraftProviderRetryClassification
+
+    var taskDraftRetryClassification: TaskDraftProviderRetryClassification {
+        classification
+    }
+}
 
 private final class SequencedRetryProvider: TaskDraftProvider, @unchecked Sendable {
     let id = "sequenced-retry-provider"
