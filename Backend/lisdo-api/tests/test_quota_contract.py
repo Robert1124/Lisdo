@@ -324,6 +324,7 @@ def test_dynamodb_storekit_monthly_purchase_updates_plan_and_grants_quota(
     assert body["status"] == "verified"
     assert body["entitlements"]["iCloudSync"] is True
     assert_quota_snapshot(body["quota"], plan_id="monthlyPlus", monthly_remaining=12000, topup_remaining=0)
+    assert body["quota"]["billingSource"] == "storekit"
     assert replay_response["statusCode"] == 200
     assert replay_body["quota"] == body["quota"]
 

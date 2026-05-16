@@ -129,7 +129,7 @@ const copy = {
     "plans.managePlan": "管理套餐",
     "plans.switchPlan": "Switch",
     "plans.buyTopup": "购买补充额度",
-    "plans.billingRouteNote": "新订阅和 top-up 会打开 Stripe Checkout。套餐切换会先在这里确认，再发送给 Stripe；付款方式和发票修改使用 Stripe Billing Portal。",
+    "plans.billingRouteNote": "新订阅和 top-up 会打开 Stripe Checkout。Stripe 管理的月费套餐会通过套餐按钮打开 Stripe 修改页面；App Store 购买的套餐需要先在 Apple 订阅里取消。",
     "plans.checkoutReady": "Lisdo account session 可用后即可购买。",
     "plans.checkoutNeedsSession": "请先登录 Lisdo account。",
     "plans.checkoutOpening": "正在打开 Stripe Checkout...",
@@ -138,11 +138,14 @@ const copy = {
     "plans.changeOpening": "正在更新套餐...",
     "plans.changeUpgradeStarted": "套餐升级已提交。付款完成后额度会刷新。",
     "plans.changeDowngradeScheduled": "套餐降级已安排，会在下个账单周期生效。",
+    "plans.changeFailed": "暂时无法更新套餐。",
     "plans.portalOpening": "正在打开 Stripe Billing Portal...",
     "plans.confirmUpgradeTitle": "确认升级套餐",
     "plans.confirmUpgradeBody": "确认后，Lisdo 会向 Stripe 提交升级请求。Stripe 可能按当前账单周期计算差价并尝试付款；后端 webhook 确认后会刷新套餐和额度。",
     "plans.confirmDowngradeTitle": "确认降级套餐",
     "plans.confirmDowngradeBody": "确认后，Lisdo 会在 Stripe 安排降级。当前套餐会持续到本账单周期结束，新套餐会从下个账单周期自动开始。",
+    "plans.storekitPlanTitle": "先取消 App Store 订阅",
+    "plans.storekitPlanBody": "这个套餐是通过 App Store / StoreKit 购买的，Stripe 不能直接修改。请先到 Apple 订阅里取消自动续订；当前 App Store 套餐会持续到本账单周期结束。等它到期后再回到这里订阅网页套餐，新套餐会从下个账单周期开始生效，避免重复扣费。",
     "plans.signInUnavailable": "网页 Sign in with Apple 尚未配置。请从 Lisdo app 打开此页面。",
     "plans.signInFailed": "Sign in with Apple 未完成。请重试。",
     "plans.modalTitle": "无法继续",
@@ -397,7 +400,7 @@ const copy = {
     "plans.managePlan": "Manage plan",
     "plans.switchPlan": "Switch",
     "plans.buyTopup": "Buy top-up",
-    "plans.billingRouteNote": "New subscriptions and top-ups open Stripe Checkout. Plan switches are confirmed here and sent to Stripe; payment method and invoice changes use Stripe Billing Portal.",
+    "plans.billingRouteNote": "New subscriptions and top-ups open Stripe Checkout. Stripe-managed monthly plans open Stripe's subscription change page from the plan buttons; App Store purchases must be canceled in Apple Subscriptions first.",
     "plans.checkoutReady": "Ready when your Lisdo account session is available.",
     "plans.checkoutNeedsSession": "Log in to your Lisdo account first.",
     "plans.checkoutOpening": "Opening Stripe Checkout...",
@@ -406,11 +409,14 @@ const copy = {
     "plans.changeOpening": "Updating plan...",
     "plans.changeUpgradeStarted": "Plan upgrade started. Quota refreshes after payment completes.",
     "plans.changeDowngradeScheduled": "Plan downgrade scheduled for the next billing period.",
+    "plans.changeFailed": "Plan could not be changed right now.",
     "plans.portalOpening": "Opening Stripe Billing Portal...",
     "plans.confirmUpgradeTitle": "Confirm plan upgrade",
     "plans.confirmUpgradeBody": "After you confirm, Lisdo sends the upgrade request to Stripe. Stripe may invoice the prorated difference for the current billing period; plan and quota refresh after the backend webhook confirms payment.",
     "plans.confirmDowngradeTitle": "Confirm plan downgrade",
     "plans.confirmDowngradeBody": "After you confirm, Lisdo schedules the downgrade in Stripe. Your current plan stays active until this billing period ends, and the new plan starts automatically next billing period.",
+    "plans.storekitPlanTitle": "Cancel the App Store subscription first",
+    "plans.storekitPlanBody": "This plan was purchased through App Store / StoreKit, so Stripe cannot modify it directly. Cancel auto-renewal in Apple Subscriptions first; your current App Store plan stays active until this billing period ends. After it expires, come back here to subscribe on the web. The new web plan starts next billing period, avoiding duplicate billing.",
     "plans.signInUnavailable": "Web Sign in with Apple is not configured yet. Open this page from the Lisdo app.",
     "plans.signInFailed": "Sign in with Apple did not complete. Try again.",
     "plans.modalTitle": "Unable to continue",
@@ -833,7 +839,7 @@ function showCheckoutModal(message, options = {}) {
     confirmButton.textContent = copy[currentLang][options.confirmTextKey || "common.confirm"];
   }
   if (cancelButton instanceof HTMLElement) {
-    cancelButton.hidden = !checkoutModalConfirmAction;
+    cancelButton.hidden = false;
     cancelButton.textContent = copy[currentLang][options.cancelTextKey || "common.cancel"];
   }
   if (closeButton instanceof HTMLElement) {
@@ -860,6 +866,7 @@ function closeCheckoutModal() {
 
 function updateWebAccountUI() {
   const signedIn = isVerifiedAccount();
+  const stripeBilling = isStripeManagedMonthlyPlan();
   document.querySelectorAll("[data-apple-sign-in]").forEach((button) => {
     button.hidden = signedIn;
   });
@@ -867,7 +874,7 @@ function updateWebAccountUI() {
     button.hidden = !signedIn;
   });
   document.querySelectorAll("[data-billing-portal]").forEach((button) => {
-    button.hidden = !signedIn;
+    button.hidden = !signedIn || !stripeBilling;
   });
   document.querySelectorAll("[data-billing-route-note]").forEach((node) => {
     node.hidden = !signedIn;
@@ -933,7 +940,9 @@ async function lisdoApiPost(path, body, loadingKey = "account.profileLoading") {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error((payload.error && payload.error.message) || `HTTP ${response.status}`);
+      const error = new Error((payload.error && payload.error.message) || `HTTP ${response.status}`);
+      error.code = payload.error && payload.error.code ? payload.error.code : "";
+      throw error;
     }
     return payload;
   });
@@ -968,6 +977,14 @@ async function startCheckout(productId) {
       setCheckoutStatus("plans.checkoutReady");
       return;
     }
+    if (isStoreKitManagedMonthlyPlan()) {
+      showStoreKitPlanChangeModal();
+      return;
+    }
+    if (isStripeManagedMonthlyPlan()) {
+      await openPlanChangePortal(productId);
+      return;
+    }
     confirmSubscriptionChange(productId, activePlan);
     return;
   }
@@ -986,6 +1003,12 @@ async function startCheckout(productId) {
   } catch (error) {
     setCheckoutStatus(error.message === "missing-session" ? "plans.checkoutNeedsSession" : "plans.checkoutFailed");
   }
+}
+
+function showStoreKitPlanChangeModal() {
+  showCheckoutModal(copy[currentLang]["plans.storekitPlanBody"], {
+    titleKey: "plans.storekitPlanTitle"
+  });
 }
 
 function confirmSubscriptionChange(productId, activePlan) {
@@ -1010,8 +1033,46 @@ async function changeSubscription(productId) {
     await refreshAccountCenter();
     setCheckoutStatus(payload.status === "downgrade_scheduled" ? "plans.changeDowngradeScheduled" : "plans.changeUpgradeStarted");
   } catch (error) {
-    setCheckoutStatus(error.message === "missing-session" ? "plans.checkoutNeedsSession" : "plans.checkoutFailed");
+    if (error.message === "missing-session") {
+      setCheckoutStatus("plans.checkoutNeedsSession");
+      return;
+    }
+    showCheckoutModal(planChangeErrorMessage(error), {
+      titleKey: "plans.modalTitle"
+    });
   }
+}
+
+async function openPlanChangePortal(productId) {
+  setCheckoutStatus("plans.portalOpening");
+  try {
+    const payload = await lisdoApiPost("/v1/stripe/billing-portal/session", { productId }, "plans.portalOpening");
+    if (payload.url) {
+      window.location.assign(payload.url);
+      return;
+    }
+    throw new Error("missing portal url");
+  } catch (error) {
+    if (error.message === "missing-session") {
+      setCheckoutStatus("plans.checkoutNeedsSession");
+      return;
+    }
+    showCheckoutModal(planChangeErrorMessage(error), {
+      titleKey: "plans.modalTitle"
+    });
+  }
+}
+
+function planChangeErrorMessage(error) {
+  const fallback = copy[currentLang]["plans.changeFailed"];
+  if (!error || typeof error.message !== "string") {
+    return fallback;
+  }
+  const message = error.message.trim();
+  if (!message || /^HTTP\s+\d+$/i.test(message)) {
+    return fallback;
+  }
+  return `${fallback} ${message}`;
 }
 
 async function openBillingPortal() {
@@ -1400,6 +1461,19 @@ function planName(planId) {
 
 function isActiveMonthlyPlan(planId) {
   return ["monthlyBasic", "monthlyPlus", "monthlyMax"].includes(planId);
+}
+
+function currentBillingSource() {
+  const quota = accountState.quota;
+  return quota && typeof quota.billingSource === "string" ? quota.billingSource : "";
+}
+
+function isStoreKitManagedMonthlyPlan() {
+  return hasActiveMonthlyQuota() && currentBillingSource() === "storekit";
+}
+
+function isStripeManagedMonthlyPlan() {
+  return hasActiveMonthlyQuota() && currentBillingSource() === "stripe";
 }
 
 function hasActiveMonthlyQuota() {

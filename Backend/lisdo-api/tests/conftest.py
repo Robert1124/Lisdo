@@ -423,14 +423,21 @@ def assert_quota_snapshot(
     topup_remaining: int,
     monthly_consumed: int = 0,
     topup_consumed: int = 0,
+    billing_source: str | None = None,
 ) -> None:
-    assert quota == {
+    expected = {
         "planId": plan_id,
         "monthlyNonRolloverRemaining": monthly_remaining,
         "topUpRolloverRemaining": topup_remaining,
         "monthlyNonRolloverConsumed": monthly_consumed,
         "topUpRolloverConsumed": topup_consumed,
     }
+    actual = dict(quota)
+    if billing_source is None:
+        actual.pop("billingSource", None)
+    else:
+        expected["billingSource"] = billing_source
+    assert actual == expected
 
 
 def assert_draft_first_response(body: dict[str, Any]) -> None:

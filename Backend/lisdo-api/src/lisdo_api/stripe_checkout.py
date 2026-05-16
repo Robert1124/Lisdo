@@ -31,6 +31,14 @@ class StripeWebhookError(ValueError):
     pass
 
 
+NON_STRIPE_PLAN_CHANGE_MESSAGE = (
+    "This plan is not managed by Stripe. If it was purchased in the App Store, "
+    "cancel auto-renewal in Apple Subscriptions first. The current App Store plan "
+    "stays active until this billing period ends; after it expires, subscribe on "
+    "the web and the new plan starts next billing period."
+)
+
+
 @dataclass(frozen=True)
 class StripeProduct:
     product_id: str
@@ -114,6 +122,8 @@ def create_checkout_session(
     if product.mode == "subscription" and has_active_monthly_quota:
         if product.plan_id == state.plan_id:
             raise StripeCheckoutError("This plan is already active.")
+        if state.billing_source == "storekit":
+            raise StripeCheckoutError(NON_STRIPE_PLAN_CHANGE_MESSAGE)
         raise StripeCheckoutError("Use the billing portal to change an active subscription.")
 
     stripe = _configured_stripe(_stripe_secret_key(config))
@@ -157,23 +167,74 @@ def create_checkout_session(
     }
 
 
-def create_billing_portal_session(config: DevConfig, *, return_url: str | None = None) -> dict[str, str]:
+def create_billing_portal_session(
+    config: DevConfig,
+    *,
+    return_url: str | None = None,
+    product_id: str | None = None,
+) -> dict[str, str]:
     customer_id = stripe_customer_id_for_account(config)
     if customer_id is None:
+        if product_id and load_state(config).billing_source == "storekit":
+            raise StripeCheckoutError(NON_STRIPE_PLAN_CHANGE_MESSAGE)
         raise StripeCheckoutError("This account does not have Stripe billing history yet.")
 
     stripe = _configured_stripe(_stripe_secret_key(config))
-    try:
-        session = stripe.billing_portal.Session.create(
-            customer=customer_id,
-            return_url=_nonempty(return_url) or config.stripe_billing_portal_return_url,
+    resolved_return_url = _nonempty(return_url) or config.stripe_billing_portal_return_url
+    session_args: dict[str, Any] = {
+        "customer": customer_id,
+        "return_url": resolved_return_url,
+    }
+    if product_id:
+        session_args["flow_data"] = _subscription_update_flow_data(
+            config,
+            stripe,
+            customer_id,
+            product_id,
+            resolved_return_url,
         )
+    try:
+        session = stripe.billing_portal.Session.create(**session_args)
     except Exception as exc:
         raise StripeCheckoutError("Stripe Billing Portal session could not be created.") from exc
     return {
         "status": "created",
         "id": _required_string(session, "id"),
         "url": _required_string(session, "url"),
+    }
+
+
+def _subscription_update_flow_data(
+    config: DevConfig,
+    stripe: Any,
+    customer_id: str,
+    product_id: str,
+    return_url: str,
+) -> dict[str, Any]:
+    target_product = _product_for_id(product_id)
+    if target_product.mode != "subscription" or target_product.plan_id is None:
+        raise StripeCheckoutError("Billing portal plan switch requires a monthly subscription product.")
+    subscription, item = _active_monthly_subscription_item(config, stripe, customer_id)
+    subscription_id = _optional_string(subscription, "id")
+    item_id = _optional_string(item, "id")
+    if subscription_id is None or item_id is None:
+        raise StripeCheckoutError("Stripe subscription could not be loaded.")
+    return {
+        "type": "subscription_update_confirm",
+        "subscription_update_confirm": {
+            "subscription": subscription_id,
+            "items": [
+                {
+                    "id": item_id,
+                    "price": _price_id(config, target_product),
+                    "quantity": 1,
+                }
+            ],
+        },
+        "after_completion": {
+            "type": "redirect",
+            "redirect": {"return_url": return_url},
+        },
     }
 
 
@@ -199,7 +260,7 @@ def create_subscription_change(config: DevConfig, *, product_id: str) -> dict[st
 
     customer_id = stripe_customer_id_for_account(config)
     if customer_id is None:
-        raise StripeCheckoutError("This account does not have Stripe billing history yet.")
+        raise StripeCheckoutError(NON_STRIPE_PLAN_CHANGE_MESSAGE)
 
     stripe = _configured_stripe(_stripe_secret_key(config))
     subscription, item = _active_monthly_subscription_item(config, stripe, customer_id)
@@ -622,7 +683,7 @@ def _active_monthly_subscription_item(config: DevConfig, stripe: Any, customer_i
             price_id = _price_id_from_subscription_item(item)
             if price_id in configured_monthly_prices:
                 return subscription, item
-    raise StripeCheckoutError("No active Stripe monthly subscription was found for this account.")
+    raise StripeCheckoutError(NON_STRIPE_PLAN_CHANGE_MESSAGE)
 
 
 def _price_id_from_subscription_item(item: Any) -> str | None:

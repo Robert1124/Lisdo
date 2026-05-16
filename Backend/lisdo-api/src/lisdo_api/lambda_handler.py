@@ -279,6 +279,7 @@ def _dispatch(route: tuple[str, str], request: dict[str, Any], config: DevConfig
             session = create_billing_portal_session(
                 config,
                 return_url=body.get("returnUrl") if isinstance(body.get("returnUrl"), str) else None,
+                product_id=body.get("productId") if isinstance(body.get("productId"), str) else None,
             )
         except StripeConfigurationError as exc:
             return _error_response(503, "stripe_not_configured", str(exc))

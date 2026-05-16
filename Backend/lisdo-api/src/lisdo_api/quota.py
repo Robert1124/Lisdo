@@ -27,6 +27,7 @@ class QuotaState:
     topup_limit: int
     monthly_consumed: int = 0
     topup_consumed: int = 0
+    billing_source: str | None = None
     last_consumed_bucket: str | None = None
     last_consumptions: dict[str, int] = field(default_factory=dict)
 
@@ -83,13 +84,16 @@ class QuotaState:
         return consumptions
 
     def snapshot(self) -> dict[str, int | str]:
-        return {
+        snapshot = {
             "planId": self.plan_id,
             "monthlyNonRolloverRemaining": self.monthly_remaining,
             "topUpRolloverRemaining": self.topup_remaining,
             "monthlyNonRolloverConsumed": self.monthly_consumed,
             "topUpRolloverConsumed": self.topup_consumed,
         }
+        if self.billing_source:
+            snapshot["billingSource"] = self.billing_source
+        return snapshot
 
     def to_json(self) -> dict[str, int | str]:
         return {
@@ -705,8 +709,9 @@ def _load_dynamodb_state(config: DevConfig) -> QuotaState:
             None,
         )
     plan_id = normalize_plan(account_item.get("planId") if account_item else config.plan_id)
+    active_grants = _active_dynamodb_grants(items, config.now)
     totals: dict[str, tuple[int, int]] = {}
-    for grant in _active_dynamodb_grants(items, config.now):
+    for grant in active_grants:
         bucket = grant.get("bucket")
         if bucket not in {MONTHLY_BUCKET, TOPUP_BUCKET}:
             continue
@@ -725,6 +730,7 @@ def _load_dynamodb_state(config: DevConfig) -> QuotaState:
         topup_limit=topup_limit,
         monthly_consumed=monthly_consumed,
         topup_consumed=topup_consumed,
+        billing_source=_active_monthly_billing_source(active_grants),
     )
 
 
@@ -882,6 +888,24 @@ def _active_dynamodb_grants(items: list[dict[str, Any]], now: str) -> list[dict[
         for item in items
         if item.get("kind") == "quotaGrant" and _dynamodb_grant_is_active(item, now)
     ]
+
+
+def _active_monthly_billing_source(grants: list[dict[str, Any]]) -> str | None:
+    sources = {
+        str(grant.get("source"))
+        for grant in grants
+        if grant.get("bucket") == MONTHLY_BUCKET
+        and _nonnegative_int(grant.get("quantity")) > 0
+        and isinstance(grant.get("source"), str)
+        and grant.get("source")
+    }
+    if "storekit" in sources:
+        return "storekit"
+    if "stripe" in sources:
+        return "stripe"
+    if "dev" in sources:
+        return "dev"
+    return sorted(sources)[0] if sources else None
 
 
 def _dynamodb_grant_is_active(item: dict[str, Any], now: str) -> bool:

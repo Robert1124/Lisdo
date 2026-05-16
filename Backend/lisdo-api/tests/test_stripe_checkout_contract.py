@@ -570,6 +570,235 @@ def test_stripe_subscription_downgrade_is_scheduled_for_next_period(
     }
 
 
+def test_stripe_subscription_change_rejects_non_stripe_managed_monthly_plan(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyMax",
+            "userId": "test-user",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#storekit#max",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 50000,
+            "consumed": 0,
+            "source": "storekit",
+            "productId": "monthlyMax",
+            "externalEventId": "max",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-06-14T12:00:00Z",
+            "originalTransactionId": "1000001",
+        }
+    )
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_prices={
+            "monthlyBasic": "price_monthly_basic",
+            "monthlyPlus": "price_monthly_plus",
+            "monthlyMax": "price_monthly_max",
+        },
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/subscription/change",
+        token="dev-token",
+        body={"productId": "monthlyBasic"},
+    )
+
+    assert response["statusCode"] == 400
+    assert body["error"]["code"] == "invalid_stripe_subscription_change"
+    assert "not managed by Stripe" in body["error"]["message"]
+    assert "App Store" in body["error"]["message"]
+
+
+def test_stripe_checkout_rejects_storekit_monthly_plan_with_next_period_guidance(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyMax",
+            "userId": "test-user",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#storekit#max",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 50000,
+            "consumed": 0,
+            "source": "storekit",
+            "productId": "monthlyMax",
+            "externalEventId": "max",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-06-14T12:00:00Z",
+            "originalTransactionId": "1000001",
+        }
+    )
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_prices={
+            "monthlyBasic": "price_monthly_basic",
+            "monthlyPlus": "price_monthly_plus",
+            "monthlyMax": "price_monthly_max",
+        },
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/checkout/session",
+        token="dev-token",
+        body={"productId": "monthlyBasic"},
+    )
+
+    assert response["statusCode"] == 400
+    assert body["error"]["code"] == "invalid_stripe_checkout"
+    assert "App Store" in body["error"]["message"]
+    assert "new plan starts next billing period" in body["error"]["message"]
+
+
+def test_stripe_billing_portal_session_can_deep_link_to_plan_switch(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyBasic",
+            "userId": "test-user",
+            "stripeCustomerId": "cus_portal",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#stripe#basic",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 3000,
+            "consumed": 0,
+            "source": "stripe",
+            "productId": "monthlyBasic",
+            "externalEventId": "basic",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-06-14T12:00:00Z",
+            "stripeCustomerId": "cus_portal",
+            "stripeSubscriptionId": "sub_portal",
+        }
+    )
+    stripe_calls = _install_fake_stripe(
+        monkeypatch,
+        subscriptions=[
+            {
+                "id": "sub_portal",
+                "status": "active",
+                "items": {
+                    "data": [
+                        {
+                            "id": "si_portal",
+                            "price": {"id": "price_monthly_basic"},
+                        }
+                    ]
+                },
+            }
+        ],
+    )
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_prices={
+            "monthlyBasic": "price_monthly_basic",
+            "monthlyPlus": "price_monthly_plus",
+            "monthlyMax": "price_monthly_max",
+        },
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/billing-portal/session",
+        token="dev-token",
+        body={"productId": "monthlyPlus", "returnUrl": "https://lisdo.app/account"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["url"] == "https://billing.stripe.test/session/bps_test_123"
+    assert stripe_calls[0] == {
+        "subscriptionList": {
+            "customer": "cus_portal",
+            "status": "all",
+            "limit": 20,
+            "expand": ["data.items.data.price"],
+        }
+    }
+    assert stripe_calls[1] == {
+        "portal": {
+            "customer": "cus_portal",
+            "return_url": "https://lisdo.app/account",
+            "flow_data": {
+                "type": "subscription_update_confirm",
+                "subscription_update_confirm": {
+                    "subscription": "sub_portal",
+                    "items": [
+                        {
+                            "id": "si_portal",
+                            "price": "price_monthly_plus",
+                            "quantity": 1,
+                        }
+                    ],
+                },
+                "after_completion": {
+                    "type": "redirect",
+                    "redirect": {"return_url": "https://lisdo.app/account"},
+                },
+            },
+        }
+    }
+
+
 def test_stripe_subscription_invoice_webhook_grants_plan_quota_and_is_idempotent(
     load_lambda_handler,
     monkeypatch,
@@ -635,6 +864,7 @@ def test_stripe_subscription_invoice_webhook_grants_plan_quota_and_is_idempotent
     assert first_body["status"] == "processed"
     assert first_body["eventType"] == "invoice.paid"
     assert_quota_snapshot(first_body["quota"], plan_id="monthlyBasic", monthly_remaining=3000, topup_remaining=0)
+    assert first_body["quota"]["billingSource"] == "stripe"
     assert replay_response["statusCode"] == 200
     assert replay_body["quota"] == first_body["quota"]
 

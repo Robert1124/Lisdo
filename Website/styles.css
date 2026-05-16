@@ -1224,6 +1224,10 @@ button {
   min-width: 118px;
 }
 
+.checkout-modal-actions [hidden] {
+  display: none !important;
+}
+
 body.modal-open {
   overflow: hidden;
 }
