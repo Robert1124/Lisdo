@@ -42,6 +42,7 @@ def unsigned_apple_identity_token(
     subject: str = "apple-subject-1",
     audience: str = "com.yiwenwu.Lisdo",
     email: str | None = "test@example.com",
+    nonce: str | None = None,
 ) -> str:
     header = {"alg": "none", "typ": "JWT"}
     payload: dict[str, Any] = {
@@ -52,6 +53,8 @@ def unsigned_apple_identity_token(
     }
     if email is not None:
         payload["email"] = email
+    if nonce is not None:
+        payload["nonce"] = nonce
     return ".".join(
         [
             _base64url_json(header),

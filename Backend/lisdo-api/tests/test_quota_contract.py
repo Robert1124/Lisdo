@@ -152,6 +152,69 @@ def test_dynamodb_auth_apple_creates_account_session_and_bearer_token_access(
     assert len(_dynamodb_items(table, kind="session")) == 1
 
 
+def test_dynamodb_auth_apple_rejects_nonce_mismatch(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    _install_fake_boto3(monkeypatch)
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/auth/apple",
+        body={
+            "identityToken": unsigned_apple_identity_token(
+                subject="web-nonce-user",
+                audience="com.yiwenwu.Lisdo.web",
+                nonce="apple-nonce",
+            ),
+            "nonce": "different-browser-nonce",
+        },
+        token=None,
+    )
+
+    assert response["statusCode"] == 400
+    assert body["error"]["code"] == "invalid_apple_identity"
+    assert "nonce" in body["error"]["message"]
+
+
+def test_dynamodb_auth_apple_accepts_matching_nonce(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    _install_fake_boto3(monkeypatch)
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/auth/apple",
+        body={
+            "identityToken": unsigned_apple_identity_token(
+                subject="web-nonce-user",
+                audience="com.yiwenwu.Lisdo.web",
+                nonce="browser-nonce",
+            ),
+            "nonce": "browser-nonce",
+        },
+        token=None,
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "authenticated"
+
+
 def test_dynamodb_account_profile_get_returns_apple_identity_and_patch_is_not_available(
     load_lambda_handler,
     monkeypatch,

@@ -31,6 +31,7 @@ def verify_apple_identity_token(
     *,
     client_ids: tuple[str, ...],
     verification_mode: str,
+    expected_nonce: str | None = None,
     now: int | None = None,
 ) -> AppleIdentity:
     if not identity_token or identity_token.count(".") != 2:
@@ -43,7 +44,7 @@ def verify_apple_identity_token(
         _verify_rs256_signature(identity_token, header, signature)
         claims = payload
 
-    return _identity_from_claims(claims, client_ids=client_ids, now=now or int(time.time()))
+    return _identity_from_claims(claims, client_ids=client_ids, expected_nonce=expected_nonce, now=now or int(time.time()))
 
 
 def account_id_for_apple_subject(subject: str) -> str:
@@ -65,7 +66,13 @@ def _jwt_parts(token: str) -> tuple[dict[str, Any], dict[str, Any], bytes]:
     return header, payload, signature
 
 
-def _identity_from_claims(claims: dict[str, Any], *, client_ids: tuple[str, ...], now: int) -> AppleIdentity:
+def _identity_from_claims(
+    claims: dict[str, Any],
+    *,
+    client_ids: tuple[str, ...],
+    expected_nonce: str | None,
+    now: int,
+) -> AppleIdentity:
     if claims.get("iss") != APPLE_ISSUER:
         raise AppleIdentityTokenError("identityToken issuer is not Apple.")
 
@@ -89,6 +96,11 @@ def _identity_from_claims(claims: dict[str, Any], *, client_ids: tuple[str, ...]
     expiration = claims.get("exp")
     if not isinstance(expiration, int) or expiration <= now:
         raise AppleIdentityTokenError("identityToken is expired.")
+
+    if expected_nonce is not None:
+        token_nonce = claims.get("nonce")
+        if not isinstance(token_nonce, str) or token_nonce != expected_nonce:
+            raise AppleIdentityTokenError("identityToken nonce does not match the browser sign-in request.")
 
     email = claims.get("email")
     return AppleIdentity(

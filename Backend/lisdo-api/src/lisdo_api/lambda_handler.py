@@ -114,6 +114,7 @@ def _dispatch(route: tuple[str, str], request: dict[str, Any], config: DevConfig
                 identity_token,
                 client_ids=config.apple_client_ids,
                 verification_mode=config.apple_identity_verification_mode,
+                expected_nonce=_expected_nonce_from_auth_body(body),
             )
         except AppleIdentityTokenError as exc:
             raise InvalidRequest("invalid_apple_identity", str(exc)) from exc
@@ -482,6 +483,14 @@ def _positive_int(value: Any) -> int | None:
     if isinstance(value, int) and value > 0:
         return value
     return None
+
+
+def _expected_nonce_from_auth_body(body: dict[str, Any]) -> str | None:
+    nonce = body.get("nonce")
+    if not isinstance(nonce, str):
+        return None
+    nonce = nonce.strip()
+    return nonce or None
 
 
 class InvalidRequest(Exception):

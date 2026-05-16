@@ -88,8 +88,8 @@ const copy = {
     "plans.title": "Lisdo 账户和额度",
     "plans.subtitle": "查看四个 Lisdo plan。登录 Personal Center 后，可以管理账户、额度和订阅。",
     "plans.accountLabel": "Lisdo account",
-    "plans.personalCenterTitle": "登录并进入 Personal Center",
-    "plans.personalCenterBody": "Personal Center 用来管理账户、额度、账单和套餐。",
+    "plans.personalCenterTitle": "进入 Personal Center",
+    "plans.personalCenterBody": "账户登录、套餐、额度和账单都在 Personal Center 里管理。",
     "plans.openPersonalCenter": "Login",
     "plans.accountSignedOutTitle": "登录 Lisdo account",
     "plans.accountSignedOutBody": "登录后可以进入 Personal Center 管理账户、额度和套餐。",
@@ -341,8 +341,8 @@ const copy = {
     "plans.title": "Lisdo account and quota",
     "plans.subtitle": "Compare the four Lisdo plans. Log in to Personal Center to manage account, quota, billing, and subscriptions.",
     "plans.accountLabel": "Lisdo account",
-    "plans.personalCenterTitle": "Log in to your Personal Center",
-    "plans.personalCenterBody": "Personal Center is where account, quota, billing, and plan changes live.",
+    "plans.personalCenterTitle": "Open Personal Center",
+    "plans.personalCenterBody": "Manage account sign-in, quota, billing, and plan changes in Personal Center.",
     "plans.openPersonalCenter": "Login",
     "plans.accountSignedOutTitle": "Log in to Lisdo account",
     "plans.accountSignedOutBody": "Sign in to manage your account, quota, and plan from Personal Center.",
@@ -577,6 +577,8 @@ const webSession = {
   email: sessionStorage.getItem("lisdoAccountEmail") || "",
   displayName: sessionStorage.getItem("lisdoAccountDisplayName") || ""
 };
+const APPLE_AUTH_REQUEST_STORAGE_KEY = "lisdoAppleAuthRequest";
+const APPLE_AUTH_REQUEST_MAX_AGE_MS = 10 * 60 * 1000;
 let accountState = {
   account: null,
   profile: null,
@@ -594,16 +596,6 @@ function resolveWebConfig() {
     hashParams.get("appleRedirectURI") ||
     pageConfig.appleRedirectURI ||
     new URL("account.html", window.location.href).href;
-  const incomingToken = hashParams.get("token") || hashParams.get("sessionToken") || "";
-  const incomingAccountId = hashParams.get("accountId") || "";
-  if (incomingToken) {
-    sessionStorage.setItem("lisdoSessionToken", incomingToken);
-    if (incomingAccountId) {
-      sessionStorage.setItem("lisdoAccountId", incomingAccountId);
-    }
-    const cleanHash = document.querySelector("[data-account-center]") ? "#account" : "#plans";
-    history.replaceState({}, "", `${window.location.pathname}${window.location.search}${cleanHash}`);
-  }
   return {
     apiBaseUrl: String(apiBaseUrl).replace(/\/+$/, ""),
     appleClientId: String(appleClientId),
@@ -756,7 +748,47 @@ function updateWebAccountUI() {
 }
 
 function isVerifiedAccount() {
-  return Boolean(webSession.token && accountState.account && accountState.quota);
+  return Boolean(webSession.token && (webSession.accountId || accountState.account));
+}
+
+function createAppleAuthRequest() {
+  const authRequest = {
+    state: secureRandomToken(),
+    nonce: secureRandomToken(),
+    createdAt: Date.now()
+  };
+  sessionStorage.setItem(APPLE_AUTH_REQUEST_STORAGE_KEY, JSON.stringify(authRequest));
+  return authRequest;
+}
+
+function consumeAppleAuthRequest(returnedState) {
+  const rawRequest = sessionStorage.getItem(APPLE_AUTH_REQUEST_STORAGE_KEY);
+  sessionStorage.removeItem(APPLE_AUTH_REQUEST_STORAGE_KEY);
+  if (!rawRequest || !returnedState) {
+    return null;
+  }
+  try {
+    const authRequest = JSON.parse(rawRequest);
+    const isFresh = typeof authRequest.createdAt === "number" && Date.now() - authRequest.createdAt <= APPLE_AUTH_REQUEST_MAX_AGE_MS;
+    const stateMatches = typeof authRequest.state === "string" && authRequest.state === returnedState;
+    const hasNonce = typeof authRequest.nonce === "string" && authRequest.nonce.length > 0;
+    return isFresh && stateMatches && hasNonce ? authRequest.nonce : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function clearAppleAuthRequest() {
+  sessionStorage.removeItem(APPLE_AUTH_REQUEST_STORAGE_KEY);
+}
+
+function secureRandomToken() {
+  if (!window.crypto || !window.crypto.getRandomValues) {
+    throw new Error("secure random unavailable");
+  }
+  const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function lisdoApiPost(path, body) {
@@ -856,10 +888,15 @@ async function signInWithAppleForWeb() {
   }
   try {
     await loadAppleSignInScript();
+    const authRequest = createAppleAuthRequest();
     window.AppleID.auth.init({
       clientId: webConfig.appleClientId,
       scope: "name email",
+      responseType: "code id_token",
+      responseMode: "fragment",
       redirectURI: webConfig.appleRedirectURI,
+      state: authRequest.state,
+      nonce: authRequest.nonce,
       usePopup: true
     });
     const result = await window.AppleID.auth.signIn();
@@ -867,35 +904,118 @@ async function signInWithAppleForWeb() {
     if (!identityToken) {
       throw new Error("missing identity token");
     }
+    const returnedState = result && result.authorization && result.authorization.state ? result.authorization.state : "";
+    const expectedNonce = consumeAppleAuthRequest(returnedState);
+    if (!expectedNonce) {
+      throw new Error("state mismatch");
+    }
+    const authorizationCode = result && result.authorization && result.authorization.code ? result.authorization.code : undefined;
     const appleName = result && result.user && result.user.name ? result.user.name : undefined;
-    const response = await fetch(`${webConfig.apiBaseUrl}/v1/auth/apple`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identityToken, name: appleName })
-    });
-    const payload = await response.json();
-    if (!response.ok || !payload.session || !payload.session.token) {
-      throw new Error("auth failed");
-    }
-    webSession.token = payload.session.token;
-    webSession.accountId = payload.account && payload.account.id ? payload.account.id : "";
-    webSession.email = payload.account && payload.account.email ? payload.account.email : "";
-    sessionStorage.setItem("lisdoSessionToken", webSession.token);
-    if (webSession.accountId) {
-      sessionStorage.setItem("lisdoAccountId", webSession.accountId);
-    }
-    if (webSession.email) {
-      sessionStorage.setItem("lisdoAccountEmail", webSession.email);
-    }
-    updateWebAccountUI();
-    renderAccountCenter();
-    await refreshAccountCenter();
-    if (isVerifiedAccount()) {
-      clearCheckoutStatus();
-    }
+    await authenticateWebAccountWithApple(identityToken, appleName, authorizationCode, expectedNonce);
   } catch (error) {
+    clearAppleAuthRequest();
     setCheckoutStatus("plans.signInFailed");
   }
+}
+
+async function authenticateWebAccountWithApple(identityToken, appleName, authorizationCode, nonce) {
+  const response = await fetch(`${webConfig.apiBaseUrl}/v1/auth/apple`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      identityToken,
+      authorizationCode,
+      nonce,
+      name: appleName
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.session || !payload.session.token) {
+    throw new Error("auth failed");
+  }
+  applyAuthenticatedWebSession(payload);
+  renderAccountCenter();
+  await refreshAccountCenter();
+  if (isVerifiedAccount()) {
+    clearCheckoutStatus();
+  }
+}
+
+function applyAuthenticatedWebSession(payload) {
+  webSession.token = payload.session.token;
+  webSession.accountId = payload.account && payload.account.id ? payload.account.id : "";
+  webSession.email = payload.account && payload.account.email ? payload.account.email : "";
+  webSession.displayName = payload.profile && payload.profile.displayName ? payload.profile.displayName : webSession.displayName;
+  accountState.account = payload.account || accountState.account;
+  accountState.profile = payload.profile || accountState.profile;
+  sessionStorage.setItem("lisdoSessionToken", webSession.token);
+  if (webSession.accountId) {
+    sessionStorage.setItem("lisdoAccountId", webSession.accountId);
+  }
+  syncSessionProfile();
+  updateWebAccountUI();
+}
+
+function appleRedirectAuthPayload() {
+  const query = new URLSearchParams(window.location.search);
+  const hashParams = hashSearchParams();
+  const identityToken = query.get("id_token") || hashParams.get("id_token") || "";
+  const authorizationCode = query.get("code") || hashParams.get("code") || "";
+  const error = query.get("error") || hashParams.get("error") || "";
+  const state = query.get("state") || hashParams.get("state") || "";
+  const rawUser = query.get("user") || hashParams.get("user") || "";
+  return {
+    identityToken,
+    authorizationCode,
+    error,
+    state,
+    appleName: parseAppleUserName(rawUser)
+  };
+}
+
+function parseAppleUserName(rawUser) {
+  if (!rawUser) {
+    return undefined;
+  }
+  try {
+    const user = JSON.parse(rawUser);
+    return user && user.name ? user.name : undefined;
+  } catch (error) {
+    return undefined;
+  }
+}
+
+function cleanAppleRedirectURL() {
+  const url = new URL(window.location.href);
+  ["id_token", "code", "state", "user", "error", "error_description"].forEach((key) => {
+    url.searchParams.delete(key);
+  });
+  const hashParams = hashSearchParams();
+  const hasAppleHash = ["id_token", "code", "state", "user", "error", "error_description"].some((key) => hashParams.has(key));
+  if (hasAppleHash) {
+    url.hash = "account";
+  }
+  history.replaceState({}, "", url);
+}
+
+function handleAppleRedirectAuth() {
+  if (!document.querySelector("[data-account-center]")) {
+    return false;
+  }
+  const authPayload = appleRedirectAuthPayload();
+  if (!authPayload.identityToken && !authPayload.error) {
+    return false;
+  }
+  cleanAppleRedirectURL();
+  const expectedNonce = consumeAppleAuthRequest(authPayload.state);
+  if (authPayload.error || !authPayload.identityToken || !expectedNonce) {
+    setCheckoutStatus("plans.signInFailed");
+    return true;
+  }
+  setCheckoutStatus("account.profileLoading");
+  authenticateWebAccountWithApple(authPayload.identityToken, authPayload.appleName, authPayload.authorizationCode, expectedNonce)
+    .catch(() => setCheckoutStatus("plans.signInFailed"));
+  return true;
 }
 
 function signOutWebAccount() {
@@ -1207,5 +1327,7 @@ renderAccountCenter();
 if (new URLSearchParams(window.location.search).get("checkout") === "success" || hashSearchParams().get("checkout") === "success") {
   setCheckoutStatus("plans.checkoutSuccess");
 }
-refreshAccountCenter();
+if (!handleAppleRedirectAuth()) {
+  refreshAccountCenter();
+}
 loadGitHubReleases();
