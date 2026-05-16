@@ -350,6 +350,11 @@ public struct LisdoBackendQuota: Codable, Equatable, Sendable {
         return min(1, max(0, Double(totalConsumed) / Double(totalCapacity)))
     }
 
+    public var remainingFraction: Double {
+        guard totalCapacity > 0 else { return 0 }
+        return min(1, max(0, Double(totalRemaining) / Double(totalCapacity)))
+    }
+
     fileprivate static func resolvedPlanTier(
         planId: String,
         quota: LisdoBackendQuota,

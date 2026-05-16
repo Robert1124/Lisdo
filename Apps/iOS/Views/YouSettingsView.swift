@@ -143,18 +143,18 @@ struct YouSettingsView: View {
 
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
-                        Text("Quota usage")
+                        Text("Quota remaining")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(LisdoTheme.ink3)
                         Spacer()
-                        Text(quotaUsageLabel)
+                        Text(quotaRemainingLabel)
                             .font(.system(size: 12))
                             .foregroundStyle(LisdoTheme.ink4)
                     }
 
-                    ProgressView(value: quotaUsageFraction)
+                    ProgressView(value: quotaRemainingFraction)
                         .tint(LisdoTheme.ink1)
-                        .accessibilityLabel("Quota usage")
+                        .accessibilityLabel("Quota remaining")
                 }
 
                 if !backendRefreshStatus.isEmpty {
@@ -1067,7 +1067,7 @@ struct YouSettingsView: View {
         accountProfileName.trimmingCharacters(in: .whitespacesAndNewlines).first.map { String($0).uppercased() }
     }
 
-    private var quotaUsageLabel: String {
+    private var quotaRemainingLabel: String {
         if entitlementStore.serverQuota != nil {
             if !planDisplaySnapshot.isFeatureEnabled(.lisdoManagedDrafts) {
                 return "Not active"
@@ -1087,7 +1087,7 @@ struct YouSettingsView: View {
         planDisplaySnapshot.tier == .free ? "Upgrade plan" : "Manage plan"
     }
 
-    private var mockQuotaUsageFraction: Double {
+    private var mockQuotaRemainingFraction: Double {
         let balance = planDisplaySnapshot.quotaBalance
         let monthlyUnits = balance.monthlyNonRolloverUnits
         guard monthlyUnits > 0 else { return 0.06 }
@@ -1095,8 +1095,8 @@ struct YouSettingsView: View {
         return min(0.86, max(0.1, Double(seed) / 25.0))
     }
 
-    private var quotaUsageFraction: Double {
-        entitlementStore.serverQuota?.consumedFraction ?? mockQuotaUsageFraction
+    private var quotaRemainingFraction: Double {
+        entitlementStore.serverQuota?.remainingFraction ?? mockQuotaRemainingFraction
     }
 
     private var providerSummary: String {

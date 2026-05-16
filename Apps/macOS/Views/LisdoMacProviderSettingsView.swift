@@ -344,18 +344,18 @@ struct LisdoMacProviderSettingsView: View {
     private var lisdoQuotaPreview: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("Quota usage")
+                Text("Quota remaining")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(quotaUsageLabel)
+                Text(quotaRemainingLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            ProgressView(value: quotaUsageFraction)
+            ProgressView(value: quotaRemainingFraction)
                 .tint(LisdoMacTheme.ink1)
-                .accessibilityLabel("Quota usage")
+                .accessibilityLabel("Quota remaining")
 
             Button {
                 Task { await refreshLisdoBackendIfConfigured(silent: false) }
@@ -590,7 +590,7 @@ struct LisdoMacProviderSettingsView: View {
         entitlementStore.effectiveSnapshot.isFeatureEnabled(.lisdoManagedDrafts)
     }
 
-    private var quotaUsageLabel: String {
+    private var quotaRemainingLabel: String {
         if entitlementStore.serverQuota != nil {
             return "Included usage"
         }
@@ -598,7 +598,7 @@ struct LisdoMacProviderSettingsView: View {
         return canUseLisdoProvider ? "Local preview" : "Not active"
     }
 
-    private var mockQuotaUsageFraction: Double {
+    private var mockQuotaRemainingFraction: Double {
         let balance = entitlementStore.snapshot.quotaBalance
         let monthlyUnits = balance.monthlyNonRolloverUnits
         guard monthlyUnits > 0 else { return 0.06 }
@@ -606,8 +606,8 @@ struct LisdoMacProviderSettingsView: View {
         return min(0.86, max(0.1, Double(seed) / 25.0))
     }
 
-    private var quotaUsageFraction: Double {
-        entitlementStore.serverQuota?.consumedFraction ?? mockQuotaUsageFraction
+    private var quotaRemainingFraction: Double {
+        entitlementStore.serverQuota?.remainingFraction ?? mockQuotaRemainingFraction
     }
 
     private var selectedImageProcessingMode: LisdoImageProcessingMode {
