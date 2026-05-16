@@ -5,6 +5,7 @@ import SwiftUI
 struct DraftReviewView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var entitlementStore: LisdoEntitlementStore
     @Query private var captures: [CaptureItem]
 
     var draft: ProcessingDraft
@@ -571,12 +572,17 @@ struct DraftReviewView: View {
         defer { isRevising = false }
 
         do {
+            let mode = revisionMode
+            guard canUseManagedRevision(mode: mode) else {
+                saveError = managedRevisionUnavailableMessage()
+                return
+            }
+
             guard let provider = try makeRevisionProvider() else {
                 saveError = "No hosted API provider is configured. Add a local API key in You before revising this draft."
                 return
             }
 
-            let mode = revisionMode
             let settings = DraftProviderFactory().loadSettings(for: mode)
             let capture = captures.first(where: { $0.id == draft.captureItemId })
             let input = TaskDraftInput(
@@ -589,38 +595,40 @@ struct DraftReviewView: View {
                 timeZoneIdentifier: TimeZone.current.identifier
             )
 
-            let revised = try await TaskDraftProviderOutputRetry.generateDraft(
-                provider: provider,
-                input: input,
-                categories: categories,
-                options: TaskDraftProviderOptions(model: settings.model)
-            )
+            try await LisdoBackgroundTaskRunner.run(named: "Lisdo hosted revision") {
+                let revised = try await TaskDraftProviderOutputRetry.generateDraft(
+                    provider: provider,
+                    input: input,
+                    categories: categories,
+                    options: TaskDraftProviderOptions(model: settings.model)
+                )
 
-            draft.recommendedCategoryId = revised.recommendedCategoryId ?? selectedCategoryId
-            draft.title = revised.title
-            draft.summary = revised.summary
-            draft.blocks = revised.blocks.sorted { $0.order < $1.order }
-            draft.suggestedReminders = revised.suggestedReminders.sorted { $0.order < $1.order }
-            draft.dueDateText = revised.dueDateText
-            draft.dueDate = revised.dueDate
-            draft.scheduledDate = revised.scheduledDate
-            draft.dateResolutionReferenceDate = revised.dateResolutionReferenceDate
-            draft.priority = revised.priority
-            draft.confidence = revised.confidence
-            draft.generatedByProvider = revised.generatedByProvider
-            draft.generatedAt = revised.generatedAt
-            draft.needsClarification = revised.needsClarification
-            draft.questionsForUser = revised.questionsForUser
+                draft.recommendedCategoryId = revised.recommendedCategoryId ?? selectedCategoryId
+                draft.title = revised.title
+                draft.summary = revised.summary
+                draft.blocks = revised.blocks.sorted { $0.order < $1.order }
+                draft.suggestedReminders = revised.suggestedReminders.sorted { $0.order < $1.order }
+                draft.dueDateText = revised.dueDateText
+                draft.dueDate = revised.dueDate
+                draft.scheduledDate = revised.scheduledDate
+                draft.dateResolutionReferenceDate = revised.dateResolutionReferenceDate
+                draft.priority = revised.priority
+                draft.confidence = revised.confidence
+                draft.generatedByProvider = revised.generatedByProvider
+                draft.generatedAt = revised.generatedAt
+                draft.needsClarification = revised.needsClarification
+                draft.questionsForUser = revised.questionsForUser
 
-            selectedCategoryId = draft.recommendedCategoryId ?? selectedCategoryId
-            title = draft.title
-            summary = draft.summary ?? ""
-            dueDateText = draft.dueDateText ?? ""
-            loadDateState(from: draft)
-            blocks = draft.blocks.sorted { $0.order < $1.order }
-            suggestedReminders = draft.suggestedReminders.sorted { $0.order < $1.order }
-            revisionInstructions = ""
-            try modelContext.save()
+                selectedCategoryId = draft.recommendedCategoryId ?? selectedCategoryId
+                title = draft.title
+                summary = draft.summary ?? ""
+                dueDateText = draft.dueDateText ?? ""
+                loadDateState(from: draft)
+                blocks = draft.blocks.sorted { $0.order < $1.order }
+                suggestedReminders = draft.suggestedReminders.sorted { $0.order < $1.order }
+                revisionInstructions = ""
+                try modelContext.save()
+            }
         } catch {
             saveError = "Draft revision failed: \(error.lisdoUserMessage)"
         }
@@ -633,11 +641,21 @@ struct DraftReviewView: View {
 
     private var revisionMode: ProviderMode {
         let preferred = captures.first(where: { $0.id == draft.captureItemId })?.preferredProviderMode ?? .openAICompatibleBYOK
-        return hostedRevisionModes.contains(preferred) ? preferred : .openAICompatibleBYOK
+        return HostedProviderQueuePolicy.isHostedProviderMode(preferred) ? preferred : .openAICompatibleBYOK
     }
 
-    private var hostedRevisionModes: [ProviderMode] {
-        [.openAICompatibleBYOK, .minimax, .anthropic, .gemini, .openRouter]
+    private func canUseManagedRevision(mode: ProviderMode) -> Bool {
+        guard mode == .lisdoManaged else { return true }
+        return entitlementStore.effectiveSnapshot.consumingDraftUnits(1).isAllowed
+    }
+
+    private func managedRevisionUnavailableMessage() -> String {
+        let snapshot = entitlementStore.effectiveSnapshot
+        if !snapshot.isFeatureEnabled(.lisdoManagedDrafts) {
+            return "Lisdo revisions need Starter Trial or a monthly plan. Refresh Lisdo after purchase, or use BYOK providers on Free."
+        }
+
+        return "Lisdo quota is empty. Refresh Lisdo, switch this capture to a BYOK provider, or choose a plan with more included usage."
     }
 
     private func revisionSourceText(capture: CaptureItem?) -> String {

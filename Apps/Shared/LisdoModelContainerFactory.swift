@@ -29,6 +29,17 @@ public enum LisdoModelContainerFactory {
         return try ModelContainer(for: schema, configurations: [configuration])
     }
 
+    public static func makeLocalPersistentContainer(name: String = "LisdoLocal") throws -> ModelContainer {
+        let configuration = ModelConfiguration(
+            name,
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .none
+        )
+
+        return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
     @MainActor
     public static func makeInMemoryPreviewContainer(seedDefaultCategories: Bool = true) throws -> ModelContainer {
         let configuration = ModelConfiguration(

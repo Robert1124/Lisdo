@@ -21,7 +21,7 @@ Capture -> Text/OCR extraction -> LLM draft -> User review -> Category todo -> i
 - MVP 1 provider：OpenAI-compatible BYOK。
 - Provider 架构：预留 Anthropic、Gemini、OpenRouter、CLI、Ollama、LM Studio/local model。
 - OCR：iOS/macOS 都使用 Apple Vision。
-- 同步：MVP 1 就启用 SwiftData + CloudKit，不做 local-only 过渡。
+- 同步：MVP 1 保持 SwiftData + CloudKit 架构，但商业规则为 Free / Starter Trial 本机 local-only，付费 monthly plan 启用 iCloud。
 - 图片策略：默认只同步 OCR text 和 metadata，不同步原图。
 - 不做 Apple Reminders / Apple Calendar 集成。
 - 不做 website/landing/pricing。
@@ -51,7 +51,7 @@ Mac/iPhone app 内输入文本或导入图片
 - macOS app target。
 - `LisdoCore` Swift Package。
 - XcodeGen `project.yml`。
-- SwiftData + CloudKit model container。
+- SwiftData model container；Free / Starter Trial 使用本机持久化，付费 monthly plan 使用 CloudKit。
 - Category CRUD 的基础能力。
 - Todo / TodoBlock 基础能力。
 - CaptureItem / ProcessingDraft 基础状态。
@@ -59,7 +59,7 @@ Mac/iPhone app 内输入文本或导入图片
 - 图片导入。
 - Apple Vision OCR。
 - OpenAI-compatible BYOK provider。
-- API key 本机 Keychain 保存。
+- API key 本机 Keychain 保存；本 milestone 不通过 iCloud Keychain 同步 BYOK 密钥。
 - 严格 JSON draft parsing 和 validation。
 - Draft review/edit/save。
 - Category recommendation 和手动切换。
@@ -108,7 +108,7 @@ Placeholder 必须像产品状态。例如：
 - LLM 返回严格 JSON，app 能 parse/validate。
 - 用户能审核、编辑、切换 category、保存 todo。
 - 保存后的 todo 能按 category 展示。
-- SwiftData + CloudKit model 从第一版开始按同步设计。
+- SwiftData model 从第一版开始按同步设计；iCloud 同步只在付费 monthly entitlement 下启用。
 - Core parsing/status/conversion tests 通过。
 
 ## MVP 2: Capture Completion + Voice + Mac Pending Queue
@@ -220,4 +220,3 @@ Share Sheet / voice / menu bar / hotkey / screen region
   -> review
   -> category todo
 ```
-

@@ -23,6 +23,7 @@
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#workflow" data-i18n="nav.workflow">工作流</a>
         <a href="#surfaces" data-i18n="nav.surfaces">产品界面</a>
+        <a href="#plans" data-i18n="nav.plans">套餐</a>
         <a href="/privacy.html" data-i18n="nav.privacy">隐私</a>
         <a href="/support.html" data-i18n="nav.support">支持</a>
         <a href="#faq" data-i18n="nav.faq">常见问题</a>
@@ -340,6 +341,67 @@
         </div>
       </section>
 
+      <section id="plans" class="section-pad plan-section">
+        <div class="section-heading reveal">
+          <h2 data-i18n="plans.title">Lisdo 账户和额度</h2>
+          <p data-i18n="plans.subtitle">查看四个 Lisdo plan。登录 Personal Center 后，可以管理账户、额度和订阅。</p>
+        </div>
+
+        <div class="web-account-panel reveal">
+          <div>
+            <span class="source-pill" data-i18n="plans.accountLabel">Lisdo account</span>
+            <h3 data-i18n="plans.personalCenterTitle">Log in to your Personal Center</h3>
+            <p data-i18n="plans.personalCenterBody">Personal Center is where account, quota, billing, and plan changes live.</p>
+          </div>
+          <div class="web-account-actions">
+            <a class="pill-button dark" href="account.html" data-open-account data-i18n="plans.openPersonalCenter">Login</a>
+          </div>
+        </div>
+
+        <div class="plan-grid reveal plan-grid-home">
+          <article class="plan-card">
+            <span class="plan-kicker" data-i18n="plans.trialKicker">Trial</span>
+            <h3 data-i18n="plans.starterTitle">Starter Trial</h3>
+            <ul class="plan-points">
+              <li data-i18n="plans.starterPoint1">One-time purchase</li>
+              <li data-i18n="plans.starterPoint2">Lisdo provider trial quota</li>
+            </ul>
+            <div class="plan-price">$0.99</div>
+            <a class="pill-button dark" href="account.html?plan=starterTrial" data-open-account data-plan-product="starterTrial" data-i18n="plans.subscribe">Subscribe</a>
+          </article>
+          <article class="plan-card featured">
+            <span class="plan-kicker" data-i18n="plans.monthlyKicker">Monthly</span>
+            <h3 data-i18n="plans.basicTitle">Monthly Basic</h3>
+            <ul class="plan-points">
+              <li data-i18n="plans.basicPoint1">Lisdo provider with more usage</li>
+              <li data-i18n="plans.basicPoint2">iCloud sync for Mac and iPhone</li>
+            </ul>
+            <div class="plan-price">$4.99<span data-i18n="plans.perMonth">/mo</span></div>
+            <a class="pill-button dark" href="account.html?plan=monthlyBasic" data-open-account data-plan-product="monthlyBasic" data-i18n="plans.subscribe">Subscribe</a>
+          </article>
+          <article class="plan-card">
+            <span class="plan-kicker" data-i18n="plans.monthlyKicker">Monthly</span>
+            <h3 data-i18n="plans.plusTitle">Monthly Plus</h3>
+            <ul class="plan-points">
+              <li data-i18n="plans.plusPoint1">Lisdo provider with higher usage</li>
+              <li data-i18n="plans.plusPoint2">iCloud sync for heavier capture flows</li>
+            </ul>
+            <div class="plan-price">$9.99<span data-i18n="plans.perMonth">/mo</span></div>
+            <a class="pill-button dark" href="account.html?plan=monthlyPlus" data-open-account data-plan-product="monthlyPlus" data-i18n="plans.subscribe">Subscribe</a>
+          </article>
+          <article class="plan-card">
+            <span class="plan-kicker" data-i18n="plans.monthlyKicker">Monthly</span>
+            <h3 data-i18n="plans.maxTitle">Monthly Max</h3>
+            <ul class="plan-points">
+              <li data-i18n="plans.maxPoint1">Lisdo provider with max usage</li>
+              <li data-i18n="plans.maxPoint2">Highest monthly quota and realtime-ready plan</li>
+            </ul>
+            <div class="plan-price">$14.99<span data-i18n="plans.perMonth">/mo</span></div>
+            <a class="pill-button dark" href="account.html?plan=monthlyMax" data-open-account data-plan-product="monthlyMax" data-i18n="plans.subscribe">Subscribe</a>
+          </article>
+        </div>
+      </section>
+
       <section id="faq" class="section-pad faq">
         <div class="section-heading reveal">
           <h2 data-i18n="faq.title">常见问题</h2>
@@ -426,6 +488,7 @@
       </nav>
     </footer>
 
+    <script src="config.js"></script>
     <script src="script.js"></script>
   </body>
 </html>

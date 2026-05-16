@@ -15,11 +15,6 @@ struct InboxView: View {
     var openDraft: (ProcessingDraft) -> Void
     var openPomodoro: (Todo) -> Void = { _ in }
 
-    @Query(sort: \LisdoSyncedSettings.updatedAt, order: .reverse) private var syncedSettings: [LisdoSyncedSettings]
-
-    private let providerFactory = DraftProviderFactory()
-    private let textRecognitionService = VisionTextRecognitionService()
-
     @State private var taskControlMessage: String?
     @State private var taskControlError: String?
     @State private var searchText = ""
@@ -27,10 +22,7 @@ struct InboxView: View {
     @State private var selectedCategoryId: String?
     @State private var selectedTodoStatus: TodoStatus?
     @State private var selectedPriority: TodoPriority?
-    @State private var batchMessage: String?
     @State private var showingFilters = false
-    @State private var isProcessingIPhoneQueue = false
-    @State private var attemptedAutomaticIPhoneQueueIDs: Set<UUID> = []
     @State private var selectedTodoDetail: TodoDetailSelection?
 
     var body: some View {
@@ -40,10 +32,6 @@ struct InboxView: View {
 
                 if showsBatchActions {
                     batchActions
-                }
-
-                if let batchMessage {
-                    ProductStateRow(icon: "checkmark.circle", title: "Batch update", message: batchMessage)
                 }
 
                 if let taskControlMessage {
@@ -103,6 +91,13 @@ struct InboxView: View {
                         } else {
                             ForEach(pending, id: \.id) { capture in
                                 PendingCaptureRow(capture: capture)
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            deletePendingCapture(capture)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
                             }
                         }
                     }
@@ -209,9 +204,6 @@ struct InboxView: View {
                     .presentationBackground(LisdoTheme.surface)
             }
         }
-        .task(id: iPhonePendingQueueSignature) {
-            await processIPhonePendingCapturesIfNeeded(automatic: true)
-        }
     }
 
     private var header: some View {
@@ -229,14 +221,12 @@ struct InboxView: View {
     private var batchActions: some View {
         HStack(spacing: 10) {
             BatchActionButton(
-                title: isProcessingIPhoneQueue ? "Working" : "Process",
+                title: "Process",
                 systemImage: "sparkles",
                 isProminent: true,
-                isDisabled: iPhoneProcessablePendingCaptures.isEmpty || isProcessingIPhoneQueue
+                isDisabled: iPhoneProcessablePendingCaptures.isEmpty
             ) {
-                Task {
-                    await processIPhonePendingCapturesIfNeeded(automatic: false)
-                }
+                triggerHostedQueueProcessing()
             }
 
             BatchActionButton(
@@ -289,17 +279,6 @@ struct InboxView: View {
 
     private var iPhoneProcessablePendingCaptures: [CaptureItem] {
         captures.filter(HostedProviderQueuePolicy.isIPhoneHostedPendingCandidate)
-    }
-
-    private var iPhonePendingQueueSignature: String {
-        let queueSignature = iPhoneProcessablePendingCaptures
-            .map { "\($0.id.uuidString):\($0.status.rawValue)" }
-            .sorted()
-            .joined(separator: "|")
-        let settingsSignature = syncedSettings.first.map {
-            "\($0.selectedProviderMode.rawValue):\($0.imageProcessingModeRawValue):\($0.voiceProcessingModeRawValue):\($0.updatedAt.timeIntervalSinceReferenceDate)"
-        } ?? "settings-missing"
-        return "\(queueSignature)#\(settingsSignature)"
     }
 
     private var todayTodos: [Todo] {
@@ -376,9 +355,21 @@ struct InboxView: View {
 
         do {
             try modelContext.save()
-            batchMessage = "Deleted draft."
         } catch {
-            batchMessage = "Could not delete draft: \(error.localizedDescription)"
+        }
+    }
+
+    private func deletePendingCapture(_ capture: CaptureItem) {
+        guard CaptureDeletionPolicy.canDeleteCapture(capture) else {
+            return
+        }
+
+        do {
+            try LisdoPendingAttachmentStore(context: modelContext).deleteAttachments(forCaptureItemId: capture.id)
+            modelContext.delete(capture)
+            try modelContext.save()
+            reloadWidgetTimelines()
+        } catch {
         }
     }
 
@@ -414,10 +405,8 @@ struct InboxView: View {
             Task { @MainActor in
                 await LisdoReminderNotificationScheduler.syncNotifications(for: todo)
             }
-            batchMessage = "Saved draft as todo."
             reloadWidgetTimelines()
         } catch {
-            batchMessage = "Could not save draft: \(error.localizedDescription)"
         }
     }
 
@@ -436,10 +425,11 @@ struct InboxView: View {
         do {
             let retried = try CaptureBatchActions.queueFailedCapturesForRetry(captures)
             try modelContext.save()
-            batchMessage = retried.isEmpty ? "No failed captures need retry." : "\(retried.count) failed capture\(retried.count == 1 ? "" : "s") queued for retry."
+            if !retried.isEmpty {
+                LisdoHostedPendingQueueProcessor.requestProcessing()
+            }
             reloadWidgetTimelines()
         } catch {
-            batchMessage = "Could not queue failed captures for retry: \(error.localizedDescription)"
         }
     }
 
@@ -447,166 +437,19 @@ struct InboxView: View {
         let archived = CaptureBatchActions.archiveCompletedTodos(todos)
         do {
             try modelContext.save()
-            batchMessage = archived.isEmpty ? "No completed todos to archive." : "\(archived.count) completed todo\(archived.count == 1 ? "" : "s") archived."
             reloadWidgetTimelines()
         } catch {
-            batchMessage = "Could not archive completed todos: \(error.localizedDescription)"
         }
     }
 
-    @MainActor
-    private func processIPhonePendingCapturesIfNeeded(automatic: Bool) async {
-        guard !isProcessingIPhoneQueue else { return }
-
-        let queue = iPhoneProcessablePendingCaptures.filter { capture in
-            !automatic || !attemptedAutomaticIPhoneQueueIDs.contains(capture.id)
-        }
-        guard !queue.isEmpty else { return }
-
-        isProcessingIPhoneQueue = true
-        defer { isProcessingIPhoneQueue = false }
-
-        var createdDrafts = 0
-        var providerUnavailable = 0
-        var failed = 0
-
-        for capture in queue {
-            do {
-                guard let provider = try providerFactory.makeProvider(for: capture.preferredProviderMode) else {
-                    providerUnavailable += 1
-                    continue
-                }
-
-                if automatic {
-                    attemptedAutomaticIPhoneQueueIDs.insert(capture.id)
-                }
-
-                let settings = providerFactory.loadSettings(for: capture.preferredProviderMode)
-                let pipeline = LisdoDraftPipeline(
-                    provider: provider,
-                    textRecognitionService: textRecognitionService,
-                    deviceType: .iPhone
-                )
-                let fallbackCategoryId = categories.first { $0.id == DefaultCategorySeeder.inboxCategoryId }?.id
-                    ?? categories.first?.id
-                    ?? DefaultCategorySeeder.inboxCategoryId
-                let attachmentContext = pendingAttachmentContext(for: capture)
-                let sourceText = pendingSourceText(for: capture, attachmentContext: attachmentContext)
-                let result = try await pipeline.processPendingCapture(
-                    capture,
-                    categories: categories,
-                    sourceTextOverride: sourceText,
-                    imageAttachment: attachmentContext.imageAttachment,
-                    audioAttachment: nil,
-                    preferredSchemaPreset: categories.first { $0.id == fallbackCategoryId }?.schemaPreset,
-                    options: TaskDraftProviderOptions(model: settings.model)
-                )
-                result.draft.recommendedCategoryId = result.draft.recommendedCategoryId ?? fallbackCategoryId
-                modelContext.insert(result.draft)
-                try modelContext.save()
-                deletePendingAttachmentsIfNeeded(for: capture)
-                createdDrafts += 1
-                await LisdoNotificationFeedback.postCaptureStatus(
-                    title: "Draft ready",
-                    body: "Lisdo processed an iPhone capture into a draft for review.",
-                    identifier: capture.id.uuidString
-                )
-            } catch {
-                let message = error.lisdoInboxUserMessage
-                if capture.status == .processing {
-                    try? capture.transition(to: .failed, error: message)
-                    try? modelContext.save()
-                } else if capture.status == .pendingProcessing || capture.status == .retryPending {
-                    try? capture.transition(to: .processing)
-                    try? capture.transition(to: .failed, error: message)
-                    try? modelContext.save()
-                }
-                failed += 1
-                await LisdoNotificationFeedback.postCaptureStatus(
-                    title: "Capture processing failed",
-                    body: message,
-                    identifier: capture.id.uuidString
-                )
-            }
+    private func triggerHostedQueueProcessing() {
+        let count = iPhoneProcessablePendingCaptures.count
+        guard count > 0 else {
+            return
         }
 
-        if createdDrafts > 0 || providerUnavailable > 0 || failed > 0 || !automatic {
-            batchMessage = iPhoneQueueMessage(createdDrafts: createdDrafts, providerUnavailable: providerUnavailable, failed: failed)
-            reloadWidgetTimelines()
-        }
-    }
-
-    private func iPhoneQueueMessage(createdDrafts: Int, providerUnavailable: Int, failed: Int) -> String {
-        var parts: [String] = []
-        if createdDrafts > 0 {
-            parts.append("\(createdDrafts) iPhone capture\(createdDrafts == 1 ? "" : "s") became reviewable draft\(createdDrafts == 1 ? "" : "s").")
-        }
-        if providerUnavailable > 0 {
-            parts.append("\(providerUnavailable) capture\(providerUnavailable == 1 ? "" : "s") need a synced API key or provider settings.")
-        }
-        if failed > 0 {
-            parts.append("\(failed) capture\(failed == 1 ? "" : "s") failed and can be retried.")
-        }
-        return parts.isEmpty ? "No iPhone captures are ready to process." : parts.joined(separator: " ")
-    }
-
-    private func pendingAttachmentContext(for capture: CaptureItem) -> IPhonePendingAttachmentContext {
-        guard HostedProviderQueuePolicy.supportsDirectAttachments(capture.preferredProviderMode) else {
-            return IPhonePendingAttachmentContext()
-        }
-
-        let attachments = (try? LisdoPendingAttachmentStore(context: modelContext).fetchAttachments(forCaptureItemId: capture.id)) ?? []
-        guard !attachments.isEmpty else {
-            return IPhonePendingAttachmentContext()
-        }
-
-        let imageAttachments = attachments
-            .filter { $0.kind == .image }
-            .map {
-                TaskDraftImageAttachment(
-                    data: $0.data,
-                    mimeType: $0.mimeOrFormat,
-                    filename: $0.filename
-                )
-            }
-        let imageAttachmentSummary = attachments
-            .filter { $0.kind == .image }
-            .map { attachment in
-                let filename = attachment.filename?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "unnamed"
-                return "\(attachment.kind.rawValue) attachment \(filename), \(attachment.mimeOrFormat), \(attachment.data.count) bytes"
-            }
-            .joined(separator: "; ")
-            .nilIfEmpty
-
-        return IPhonePendingAttachmentContext(
-            imageAttachment: imageAttachments.first,
-            attachmentSummary: imageAttachmentSummary
-        )
-    }
-
-    private func pendingSourceText(
-        for capture: CaptureItem,
-        attachmentContext: IPhonePendingAttachmentContext
-    ) -> String? {
-        let baseText = (try? capture.normalizedProcessableText())?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
-        let attachmentText = attachmentContext.attachmentSummary.map {
-            "Original image media included for direct provider analysis. \($0)"
-        }
-
-        return [
-            baseText,
-            attachmentText
-        ]
-        .compactMap { $0 }
-        .joined(separator: "\n\n")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .nilIfEmpty
-    }
-
-    private func deletePendingAttachmentsIfNeeded(for capture: CaptureItem) {
-        try? LisdoPendingAttachmentStore(context: modelContext).deleteAttachments(forCaptureItemId: capture.id)
+        LisdoHostedPendingQueueProcessor.requestProcessing()
+        reloadWidgetTimelines()
     }
 
     private func captureStatusLabel(_ status: CaptureStatus) -> String {
@@ -852,11 +695,6 @@ private struct InboxFilterSheet: View {
         }
         .presentationDetents([.medium, .large])
     }
-}
-
-private struct IPhonePendingAttachmentContext {
-    var imageAttachment: TaskDraftImageAttachment?
-    var attachmentSummary: String?
 }
 
 private struct BatchActionButton: View {

@@ -1,3 +1,4 @@
+import Combine
 import LisdoCore
 import SwiftData
 import SwiftUI
@@ -7,6 +8,7 @@ import WidgetKit
 
 struct LisdoRootView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \ProcessingDraft.generatedAt, order: .reverse) private var drafts: [ProcessingDraft]
     @Query(sort: \CaptureItem.createdAt, order: .reverse) private var captures: [CaptureItem]
     @Query(sort: \Todo.createdAt, order: .reverse) private var todos: [Todo]
@@ -16,6 +18,7 @@ struct LisdoRootView: View {
     @State private var activeSheet: LisdoSheet?
     @State private var activePomodoro: PomodoroSelection?
     @State private var pomodoroLaunchError: PomodoroLaunchError?
+    @State private var hostedPendingQueueProcessor: LisdoHostedPendingQueueProcessor?
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -66,15 +69,24 @@ struct LisdoRootView: View {
         .onAppear {
             seedDefaultCategoriesIfNeeded()
             purgeExpiredTrashedTodos()
+            requestHostedPendingProcessing(reason: "root appeared")
         }
         .onChange(of: categorySyncSignature) { _, _ in
             seedDefaultCategoriesIfNeeded()
+            requestHostedPendingProcessing(reason: "categories changed")
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            requestHostedPendingProcessing(reason: "scene active")
         }
         .onChange(of: selectedTab) { _, nextTab in
             if nextTab == .capture {
                 activeSheet = .capture
                 selectedTab = .inbox
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: LisdoHostedPendingQueueProcessor.queueDidChangeNotification)) { _ in
+            requestHostedPendingProcessing(reason: "queue notification")
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -188,6 +200,26 @@ struct LisdoRootView: View {
         #if canImport(WidgetKit)
         WidgetCenter.shared.reloadAllTimelines()
         #endif
+    }
+
+    private func requestHostedPendingProcessing(reason: String) {
+        let processor = hostedProcessor()
+        let currentCategories = categories
+
+        Task { @MainActor in
+            _ = reason
+            await processor.processPendingHostedCaptures(categories: currentCategories)
+        }
+    }
+
+    private func hostedProcessor() -> LisdoHostedPendingQueueProcessor {
+        if let hostedPendingQueueProcessor {
+            return hostedPendingQueueProcessor
+        }
+
+        let processor = LisdoHostedPendingQueueProcessor(modelContext: modelContext)
+        hostedPendingQueueProcessor = processor
+        return processor
     }
 }
 

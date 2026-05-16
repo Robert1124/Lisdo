@@ -8,8 +8,8 @@ options:
 settings:
   base:
     DEVELOPMENT_TEAM: WDAN6HW5VM
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "5"
     SWIFT_VERSION: "5.9"
     ENABLE_USER_SCRIPT_SANDBOXING: "YES"
 packages:
@@ -24,6 +24,10 @@ targets:
     platform: iOS
     productName: Lisdo
     deploymentTarget: "17.0"
+    attributes:
+      SystemCapabilities:
+        com.apple.InAppPurchase:
+          enabled: 1
     sources:
       - path: Apps/iOS
       - path: Apps/Shared
@@ -32,8 +36,8 @@ targets:
       path: Apps/iOS/Info.plist
       properties:
         CFBundleDisplayName: Lisdo
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSCameraUsageDescription: Lisdo uses the camera to capture notes, screenshots, and documents so they can become reviewable task drafts.
         NSMicrophoneUsageDescription: Lisdo records voice captures so you can review the transcript before creating a task draft.
         NSSpeechRecognitionUsageDescription: Lisdo uses speech recognition to turn voice captures into transcripts for draft review.
@@ -57,6 +61,8 @@ targets:
           - iCloud.com.yiwenwu.Lisdo
         com.apple.developer.icloud-services:
           - CloudKit
+        com.apple.developer.applesignin:
+          - Default
         keychain-access-groups:
           - "$(AppIdentifierPrefix)com.yiwenwu.Lisdo.shared"
         com.apple.security.application-groups:
@@ -72,9 +78,11 @@ targets:
         product: LisdoCore
       - sdk: ActivityKit.framework
       - sdk: AppIntents.framework
+      - sdk: AuthenticationServices.framework
       - sdk: AVFoundation.framework
       - sdk: PhotosUI.framework
       - sdk: Speech.framework
+      - sdk: StoreKit.framework
       - sdk: Vision.framework
       - target: LisdoWidgetsExtension
         embed: true
@@ -110,6 +118,8 @@ targets:
           - iCloud.com.yiwenwu.Lisdo
         com.apple.developer.icloud-services:
           - CloudKit
+        com.apple.developer.applesignin:
+          - Default
         keychain-access-groups:
           - "$(AppIdentifierPrefix)com.yiwenwu.Lisdo.shared"
         com.apple.security.app-sandbox: true
@@ -135,9 +145,11 @@ targets:
       - package: Sparkle
         product: Sparkle
       - sdk: AVFoundation.framework
+      - sdk: AuthenticationServices.framework
       - sdk: Carbon.framework
       - sdk: ScreenCaptureKit.framework
       - sdk: Speech.framework
+      - sdk: StoreKit.framework
       - sdk: UniformTypeIdentifiers.framework
       - sdk: Vision.framework
 
@@ -153,8 +165,8 @@ targets:
       path: Extensions/Widgets/Info.plist
       properties:
         CFBundleDisplayName: Lisdo
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -191,8 +203,8 @@ targets:
       path: Extensions/Share/Info.plist
       properties:
         CFBundleDisplayName: Lisdo
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         NSExtension:
           NSExtensionAttributes:

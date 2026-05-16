@@ -367,7 +367,9 @@ public final class LisdoDraftPipeline: @unchecked Sendable {
         revisionInstructions: String?,
         options: TaskDraftProviderOptions
     ) async throws -> LisdoDraftPipelineResult {
-        try captureItem.transition(to: .processing)
+        if captureItem.status != .processing {
+            try captureItem.transition(to: .processing)
+        }
 
         let input = TaskDraftInput(
             captureItemId: captureItem.id,
@@ -394,17 +396,30 @@ public final class LisdoDraftPipeline: @unchecked Sendable {
 
     private func markFailedIfPossible(_ captureItem: CaptureItem, error: Error) {
         if captureItem.status == .processing {
-            try? captureItem.transition(to: .failed, error: String(describing: error))
+            try? captureItem.transition(to: .failed, error: error.lisdoProcessingMessage)
         }
     }
 
     private func supportsDirectAttachmentProvider(_ mode: ProviderMode) -> Bool {
         switch mode {
-        case .openAICompatibleBYOK, .openRouter, .ollama, .lmStudio, .localModel:
+        case .openAICompatibleBYOK, .lisdoManaged, .openRouter, .ollama, .lmStudio, .localModel:
             return true
         case .minimax, .anthropic, .gemini, .macOnlyCLI:
             return false
         }
+    }
+}
+
+private extension Error {
+    var lisdoProcessingMessage: String {
+        if let localizedError = self as? LocalizedError,
+           let description = localizedError.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+
+        let description = localizedDescription
+        return description.isEmpty ? String(describing: self) : description
     }
 }
 

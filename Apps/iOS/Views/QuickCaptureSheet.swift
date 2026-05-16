@@ -118,6 +118,7 @@ enum LisdoWidgetTimelineRefresh {
 struct QuickCaptureSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var entitlementStore: LisdoEntitlementStore
 
     var categories: [Category]
 
@@ -146,7 +147,6 @@ struct QuickCaptureSheet: View {
     @State private var recordedVoiceDuration: TimeInterval?
     @State private var voiceRecordingLimitTask: Task<Void, Never>?
 
-    private let providerFactory = DraftProviderFactory()
     private let speechService = IOSSpeechTranscriptionService()
     private let textRecognitionService = VisionTextRecognitionService()
 
@@ -856,7 +856,7 @@ struct QuickCaptureSheet: View {
         if providerMode == .macOnlyCLI {
             message = .processing("Queueing capture", "Lisdo is saving this as a pending item for Mac processing. No todo will be created until a draft is reviewed.")
             do {
-                let capture = try makePendingMacCapture(from: payload, providerMode: providerMode)
+                let capture = try makePendingCapture(from: payload, providerMode: providerMode)
                 modelContext.insert(capture)
                 try savePendingAttachmentIfNeeded(
                     imageAttachment: imageAttachment,
@@ -878,53 +878,33 @@ struct QuickCaptureSheet: View {
             return
         }
 
-        if hostedProviderModes.contains(providerMode) {
+        if HostedProviderQueuePolicy.isHostedProviderMode(providerMode) {
+            guard canUseSelectedManagedProvider() else {
+                message = managedProviderUnavailableMessage()
+                return
+            }
+
             do {
-                guard let provider = try providerForHostedCapture() else {
-                    saveFailedCapture(payload: payload, providerMode: providerMode, reason: .providerUnavailable)
-                    message = .failure(
-                        "Provider settings needed",
-                        "No hosted API provider is configured for this capture. Add a local API key in You or choose a Mac-local queue mode."
-                    )
-                    return
-                }
-
-                let settings = providerFactory.loadSettings(for: providerMode)
-                let pipeline = LisdoDraftPipeline(
-                    provider: provider,
-                    textRecognitionService: textRecognitionService,
-                    deviceType: .iPhone
-                )
-
-                message = .processing("Creating draft", "Lisdo is processing this capture into a reviewable draft. No todo is saved from AI output.")
-                let result = try await pipeline.processExtractedCapture(
-                    sourceType: sourceType,
-                    sourceText: sourceText,
-                    transcriptText: transcriptText,
-                    transcriptLanguage: transcriptLanguage,
-                    sourceImageAssetId: sourceImageAssetId,
-                    sourceAudioAssetId: sourceAudioAssetId,
+                message = .processing("Saving capture", "Lisdo is saving this locally before draft generation. AI output will still wait for review.")
+                let capture = try makePendingCapture(from: payload, providerMode: providerMode)
+                modelContext.insert(capture)
+                try savePendingAttachmentIfNeeded(
                     imageAttachment: imageAttachment,
                     audioAttachment: audioAttachment,
-                    categories: categories,
-                    userNote: trimmedNote,
-                    preferredSchemaPreset: selectedCategory?.schemaPreset,
-                    options: TaskDraftProviderOptions(model: settings.model)
+                    captureItemId: capture.id
                 )
-                result.draft.recommendedCategoryId = result.draft.recommendedCategoryId ?? selectedCategoryId
-                modelContext.insert(result.captureItem)
-                modelContext.insert(result.draft)
                 try modelContext.save()
-                LisdoWidgetTimelineRefresh.request(reason: "iOS draft created")
+                LisdoWidgetTimelineRefresh.request(reason: "iOS hosted capture queued")
+                LisdoHostedPendingQueueProcessor.requestProcessing()
                 await LisdoNotificationFeedback.postCaptureStatus(
-                    title: "Draft ready",
-                    body: "Lisdo processed a capture into a draft for review.",
-                    identifier: result.captureItem.id.uuidString
+                    title: "Capture saved",
+                    body: "Lisdo saved a local pending capture and will process it into a reviewable draft.",
+                    identifier: capture.id.uuidString
                 )
                 dismiss()
             } catch {
                 saveFailedCapture(payload: payload, providerMode: providerMode, reason: .providerFailed(error.lisdoUserMessage))
-                message = .failure("Draft generation failed", error.lisdoUserMessage)
+                message = .failure("Capture could not be saved", error.lisdoUserMessage)
             }
             return
         }
@@ -1143,10 +1123,6 @@ struct QuickCaptureSheet: View {
         }
     }
 
-    private func providerForHostedCapture() throws -> (any TaskDraftProvider)? {
-        try providerFactory.makeProvider(for: providerMode)
-    }
-
     @MainActor
     private func loadSyncedCaptureSettings() {
         do {
@@ -1227,7 +1203,7 @@ struct QuickCaptureSheet: View {
         }
     }
 
-    private func makePendingMacCapture(from payload: LisdoCapturePayload, providerMode: ProviderMode) throws -> CaptureItem {
+    private func makePendingCapture(from payload: LisdoCapturePayload, providerMode: ProviderMode) throws -> CaptureItem {
         _ = try LisdoCaptureFactory.normalizedProcessableText(from: payload)
         return CaptureItem(
             sourceType: payload.sourceType,
@@ -1277,8 +1253,11 @@ struct QuickCaptureSheet: View {
         if providerMode == .macOnlyCLI {
             return "This iPhone saves captures to the pending queue for Mac processing. Images can include original media; voice captures are transcribed before queueing."
         }
-        if hostedProviderModes.contains(providerMode) {
-            return "This iPhone uses synced or local Keychain credentials for the selected hosted API provider. AI output still lands as a draft for review."
+        if HostedProviderQueuePolicy.isHostedProviderMode(providerMode) {
+            if providerMode == .lisdoManaged {
+                return "Lisdo uses the staging backend for draft creation. AI output still lands as a draft for review."
+            }
+            return "This iPhone uses local-only Keychain credentials for the selected hosted API provider. AI output still lands as a draft for review."
         }
         return "This provider is Mac-local. Choose Mac-only CLI to queue from iPhone, or choose a hosted API mode to draft on this device."
     }
@@ -1291,12 +1270,28 @@ struct QuickCaptureSheet: View {
         DraftProviderFactory.metadata(for: providerMode)
     }
 
-    private var hostedProviderModes: [ProviderMode] {
-        [.openAICompatibleBYOK, .minimax, .anthropic, .gemini, .openRouter]
-    }
-
     private var imageProcessingMode: LisdoImageProcessingMode {
         LisdoImageProcessingMode(rawValue: imageProcessingModeRawValue) ?? .visionOCR
+    }
+
+    private func canUseSelectedManagedProvider() -> Bool {
+        guard providerMode == .lisdoManaged else { return true }
+        return entitlementStore.effectiveSnapshot.consumingDraftUnits(1).isAllowed
+    }
+
+    private func managedProviderUnavailableMessage() -> CaptureMessage {
+        let snapshot = entitlementStore.effectiveSnapshot
+        if !snapshot.isFeatureEnabled(.lisdoManagedDrafts) {
+            return .failure(
+                "Plan upgrade needed",
+                "Lisdo is available on Starter Trial and monthly plans. Refresh Lisdo after purchase, or use BYOK and Mac-local providers on Free."
+            )
+        }
+
+        return .failure(
+            "Lisdo quota empty",
+            "This account has no Lisdo usage left. Refresh Lisdo, switch to BYOK, or choose a plan with more included usage."
+        )
     }
 
     private var voiceProcessingMode: LisdoVoiceProcessingMode {

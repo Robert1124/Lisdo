@@ -10,6 +10,12 @@ public enum CaptureMacProcessingError: Error, Equatable, Sendable {
     case draftCaptureMismatch(expected: UUID, actual: UUID)
 }
 
+public enum CaptureHostedProcessingError: Error, Equatable, Sendable {
+    case notHostedProviderMode
+    case notProcessable(status: CaptureStatus)
+    case draftCaptureMismatch(expected: UUID, actual: UUID)
+}
+
 public enum CaptureTextNormalizer {
     public static func normalizedText(
         sourceType: CaptureSourceType,
@@ -59,6 +65,69 @@ public extension CaptureItem {
         case .rawCaptured, .processedDraft, .approvedTodo, .failed:
             return false
         }
+    }
+
+    func isHostedProcessablePending(
+        now: Date = Date(),
+        staleLockInterval: TimeInterval = 900
+    ) -> Bool {
+        guard HostedProviderQueuePolicy.isHostedProviderMode(preferredProviderMode) else {
+            return false
+        }
+
+        switch status {
+        case .pendingProcessing, .retryPending:
+            return true
+        case .processing:
+            return isProcessingLockStale(now: now, staleLockInterval: staleLockInterval)
+        case .rawCaptured, .processedDraft, .approvedTodo, .failed:
+            return false
+        }
+    }
+
+    func leaseForHostedProcessing(
+        processorDeviceId: String,
+        now: Date = Date(),
+        staleLockInterval: TimeInterval = 900
+    ) throws {
+        guard HostedProviderQueuePolicy.isHostedProviderMode(preferredProviderMode) else {
+            throw CaptureHostedProcessingError.notHostedProviderMode
+        }
+
+        switch status {
+        case .pendingProcessing, .retryPending:
+            try transition(to: .processing)
+        case .processing:
+            guard isProcessingLockStale(now: now, staleLockInterval: staleLockInterval) else {
+                throw CaptureHostedProcessingError.notProcessable(status: status)
+            }
+        case .rawCaptured, .processedDraft, .approvedTodo, .failed:
+            throw CaptureHostedProcessingError.notProcessable(status: status)
+        }
+
+        assignedProcessorDeviceId = processorDeviceId
+        processingLockDeviceId = processorDeviceId
+        processingLockCreatedAt = now
+        processingError = nil
+    }
+
+    @discardableResult
+    func markHostedProcessingSucceeded(with draft: ProcessingDraft) throws -> ProcessingDraft {
+        guard draft.captureItemId == id else {
+            throw CaptureHostedProcessingError.draftCaptureMismatch(expected: id, actual: draft.captureItemId)
+        }
+
+        try transition(to: .processedDraft)
+        processingLockDeviceId = nil
+        processingLockCreatedAt = nil
+        processingError = nil
+        return draft
+    }
+
+    func markHostedProcessingFailed(_ message: String) throws {
+        try transition(to: .failed, error: message)
+        processingLockDeviceId = nil
+        processingLockCreatedAt = nil
     }
 
     func leaseForMacProcessing(

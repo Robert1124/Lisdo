@@ -4,6 +4,7 @@ import Foundation
 
 public enum LisdoCloudPersistenceMode: Equatable, Sendable {
     case cloudKit
+    case entitlementLocal
     case localFallback
     case inMemoryFallback
 }
@@ -32,8 +33,8 @@ public final class LisdoICloudSyncStatusMonitor: ObservableObject {
     @Published public private(set) var snapshot: LisdoICloudSyncStatusSnapshot
 
     private let containerIdentifier: String
-    private let persistenceMode: LisdoCloudPersistenceMode
-    private let fallbackErrorDescription: String?
+    private var persistenceMode: LisdoCloudPersistenceMode
+    private var fallbackErrorDescription: String?
     private var refreshTask: Task<Void, Never>?
 
     public init(
@@ -52,6 +53,25 @@ public final class LisdoICloudSyncStatusMonitor: ObservableObject {
 
     deinit {
         refreshTask?.cancel()
+    }
+
+    public func update(
+        persistenceMode: LisdoCloudPersistenceMode,
+        fallbackErrorDescription: String? = nil,
+        refreshImmediately: Bool = true
+    ) {
+        refreshTask?.cancel()
+        self.persistenceMode = persistenceMode
+        self.fallbackErrorDescription = fallbackErrorDescription
+
+        if refreshImmediately {
+            refresh()
+        } else {
+            snapshot = Self.initialSnapshot(
+                persistenceMode: persistenceMode,
+                fallbackErrorDescription: fallbackErrorDescription
+            )
+        }
     }
 
     public func refresh() {
@@ -87,6 +107,13 @@ public final class LisdoICloudSyncStatusMonitor: ObservableObject {
                 detail: "Verifying account access.",
                 systemImage: "icloud",
                 isCloudBacked: true
+            )
+        case .entitlementLocal:
+            return LisdoICloudSyncStatusSnapshot(
+                title: "Local only",
+                detail: "Your current Lisdo plan keeps data on this device. Paid monthly plans enable iCloud sync immediately.",
+                systemImage: "internaldrive",
+                isCloudBacked: false
             )
         case .localFallback:
             return LisdoICloudSyncStatusSnapshot(

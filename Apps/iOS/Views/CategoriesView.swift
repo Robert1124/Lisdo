@@ -765,6 +765,13 @@ private struct CategorySmartListDetailView: View {
         } else {
             ForEach(failed, id: \.id) { capture in
                 PendingCaptureRow(capture: capture)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            deletePendingCapture(capture)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
             }
         }
     }
@@ -843,6 +850,22 @@ private struct CategorySmartListDetailView: View {
         modelContext.delete(draft)
         message = "Draft deleted."
         saveChanges()
+    }
+
+    private func deletePendingCapture(_ capture: CaptureItem) {
+        guard CaptureDeletionPolicy.canDeleteCapture(capture) else {
+            message = "Saved todo captures stay linked to approved todos."
+            return
+        }
+
+        do {
+            try LisdoPendingAttachmentStore(context: modelContext).deleteAttachments(forCaptureItemId: capture.id)
+            modelContext.delete(capture)
+            try modelContext.save()
+            message = "Pending capture deleted."
+        } catch {
+            message = "Could not delete pending capture: \(error.localizedDescription)"
+        }
     }
 
     private func saveDraftAsTodo(_ draft: ProcessingDraft) {

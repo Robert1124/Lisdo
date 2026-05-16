@@ -34,6 +34,25 @@ public final class LisdoSyncedSettingsStore {
     }
 
     @discardableResult
+    public func reconcileProviderMode(
+        for entitlements: LisdoEntitlementSnapshot,
+        updatedAt now: Date = Date()
+    ) throws -> LisdoSyncedSettings {
+        let settings = try fetchOrCreateSettings(updatedAt: now)
+        let preferredMode: ProviderMode? = entitlements.isFeatureEnabled(.lisdoManagedDrafts)
+            ? .lisdoManaged
+            : (settings.selectedProviderMode == .lisdoManaged ? .openAICompatibleBYOK : nil)
+
+        guard let preferredMode, settings.selectedProviderMode != preferredMode else {
+            return settings
+        }
+
+        settings.updateProviderMode(preferredMode, updatedAt: now)
+        try context.save()
+        return settings
+    }
+
+    @discardableResult
     public func updateImageProcessingModeRawValue(_ rawValue: String, updatedAt now: Date = Date()) throws -> LisdoSyncedSettings {
         let settings = try fetchOrCreateSettings(updatedAt: now)
         settings.updateImageProcessingModeRawValue(rawValue, updatedAt: now)
