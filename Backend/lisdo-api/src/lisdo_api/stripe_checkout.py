@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import DevConfig, config_for_account
-from .entitlements import normalize_plan
+from .entitlements import is_active_monthly_plan, normalize_plan
 from .quota import (
     account_id_for_stripe_customer,
     apply_external_billing_grant,
@@ -100,8 +100,14 @@ def create_checkout_session(
     cancel_url: str | None = None,
 ) -> dict[str, str]:
     product = _product_for_id(product_id)
-    if product.kind == "consumableTopUp" and load_state(config).next_bucket() is None:
+    state = load_state(config)
+    has_active_monthly_quota = is_active_monthly_plan(state.plan_id) and state.monthly_limit > 0
+    if product.kind == "consumableTopUp" and not has_active_monthly_quota:
         raise PermissionError("Top-up usage requires an active monthly plan.")
+    if product.mode == "subscription" and has_active_monthly_quota:
+        if product.plan_id == state.plan_id:
+            raise StripeCheckoutError("This plan is already active.")
+        raise StripeCheckoutError("Use the billing portal to change an active subscription.")
 
     stripe = _configured_stripe(_stripe_secret_key(config))
     metadata = {
@@ -183,7 +189,7 @@ def handle_webhook(config: DevConfig, *, payload: bytes, signature: str | None) 
 
     if event_type == "checkout.session.completed":
         return _handle_checkout_completed(config, event_type, obj)
-    if event_type == "invoice.paid":
+    if event_type in {"invoice.paid", "invoice.payment_succeeded"}:
         return _handle_invoice_paid(config, event_type, obj)
 
     return {
@@ -240,7 +246,7 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
     price_id, period_end = _invoice_price_and_period_end(invoice)
     product = _product_for_price(config, price_id)
     customer_id = _required_string(invoice, "customer")
-    account_id = _metadata(invoice).get("accountId") or account_id_for_stripe_customer(config, customer_id)
+    account_id = _account_id_from_invoice(config, invoice, customer_id)
     if not account_id:
         raise StripeWebhookError("Stripe invoice is missing account metadata.")
     account_config = config_for_account(config, account_id)
@@ -257,7 +263,7 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
         topup_quota=product.topup_quota,
         period_end=period_end,
         customer_id=customer_id,
-        subscription_id=_optional_string(invoice, "subscription"),
+        subscription_id=_subscription_id_from_invoice(invoice),
     )
     return {
         "status": "processed",
@@ -267,20 +273,77 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
 
 
 def _invoice_price_and_period_end(invoice: Any) -> tuple[str, str | None]:
-    lines = _object_value(invoice, "lines")
-    line_items = _object_value(lines, "data")
-    if not isinstance(line_items, list):
-        raise StripeWebhookError("Stripe invoice is missing line items.")
-    for line_item in line_items:
-        if line_item is None:
-            continue
-        price = _object_value(line_item, "price")
-        price_id = _object_value(price, "id")
-        if isinstance(price_id, str) and price_id:
+    for line_item in _invoice_line_items(invoice):
+        price_id = _price_id_from_invoice_line(line_item)
+        if price_id is not None:
             period = _object_value(line_item, "period")
             period_end = _object_value(period, "end")
             return price_id, _unix_timestamp_to_iso(period_end)
     raise StripeWebhookError("Stripe invoice line is missing a configured price.")
+
+
+def _invoice_line_items(invoice: Any) -> list[Any]:
+    lines = _object_value(invoice, "lines")
+    line_items = _object_value(lines, "data")
+    if not isinstance(line_items, list):
+        raise StripeWebhookError("Stripe invoice is missing line items.")
+    return [line_item for line_item in line_items if line_item is not None]
+
+
+def _price_id_from_invoice_line(line_item: Any) -> str | None:
+    price = _object_value(line_item, "price")
+    if isinstance(price, str) and price:
+        return price
+    price_id = _object_value(price, "id")
+    if isinstance(price_id, str) and price_id:
+        return price_id
+
+    pricing = _object_value(line_item, "pricing")
+    price_details = _object_value(pricing, "price_details")
+    pricing_price_id = _object_value(price_details, "price")
+    if isinstance(pricing_price_id, str) and pricing_price_id:
+        return pricing_price_id
+    return None
+
+
+def _account_id_from_invoice(config: DevConfig, invoice: Any, customer_id: str) -> str | None:
+    for metadata in _invoice_metadata_candidates(invoice):
+        account_id = metadata.get("accountId")
+        if account_id:
+            return account_id
+    return account_id_for_stripe_customer(config, customer_id)
+
+
+def _invoice_metadata_candidates(invoice: Any) -> list[dict[str, str]]:
+    candidates = [_metadata(invoice)]
+
+    parent = _object_value(invoice, "parent")
+    subscription_details = _object_value(parent, "subscription_details")
+    candidates.append(_metadata(subscription_details))
+
+    for line_item in _invoice_line_items(invoice):
+        candidates.append(_metadata(line_item))
+    return candidates
+
+
+def _subscription_id_from_invoice(invoice: Any) -> str | None:
+    subscription_id = _optional_string(invoice, "subscription")
+    if subscription_id is not None:
+        return subscription_id
+
+    parent = _object_value(invoice, "parent")
+    subscription_details = _object_value(parent, "subscription_details")
+    subscription_id = _optional_string(subscription_details, "subscription")
+    if subscription_id is not None:
+        return subscription_id
+
+    for line_item in _invoice_line_items(invoice):
+        line_parent = _object_value(line_item, "parent")
+        item_details = _object_value(line_parent, "subscription_item_details")
+        subscription_id = _optional_string(item_details, "subscription")
+        if subscription_id is not None:
+            return subscription_id
+    return None
 
 
 def _product_for_id(product_id: Any) -> StripeProduct:

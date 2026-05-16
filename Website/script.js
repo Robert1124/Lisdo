@@ -121,6 +121,8 @@ const copy = {
     "plans.perMonth": "/mo",
     "plans.buyTrial": "购买试用",
     "plans.subscribe": "订阅",
+    "plans.currentPlan": "当前套餐",
+    "plans.managePlan": "管理套餐",
     "plans.buyTopup": "购买补充额度",
     "plans.checkoutReady": "Lisdo account session 可用后即可购买。",
     "plans.checkoutNeedsSession": "请先登录 Lisdo account。",
@@ -374,6 +376,8 @@ const copy = {
     "plans.perMonth": "/mo",
     "plans.buyTrial": "Buy trial",
     "plans.subscribe": "Subscribe",
+    "plans.currentPlan": "Current",
+    "plans.managePlan": "Manage plan",
     "plans.buyTopup": "Buy top-up",
     "plans.checkoutReady": "Ready when your Lisdo account session is available.",
     "plans.checkoutNeedsSession": "Log in to your Lisdo account first.",
@@ -831,7 +835,16 @@ async function startCheckout(productId) {
     setCheckoutStatus("plans.checkoutNeedsSession");
     return;
   }
-  if (productId === "topUpUsage" && accountState.quota && !isActiveMonthlyPlan(accountState.quota.planId)) {
+  const activePlan = accountState.quota && accountState.quota.planId ? accountState.quota.planId : "";
+  if (isActiveMonthlyPlan(productId) && hasActiveMonthlyQuota()) {
+    if (productId === activePlan) {
+      setCheckoutStatus("plans.checkoutReady");
+      return;
+    }
+    await openBillingPortal();
+    return;
+  }
+  if (productId === "topUpUsage" && !hasActiveMonthlyQuota()) {
     setCheckoutStatus("account.topupNeedsPlan");
     return;
   }
@@ -1172,8 +1185,7 @@ function renderQuota() {
   const topupTotal = quota.topUpRolloverRemaining + quota.topUpRolloverConsumed;
   const total = monthlyTotal + topupTotal;
   const remaining = quota.monthlyNonRolloverRemaining + quota.topUpRolloverRemaining;
-  const consumed = total - remaining;
-  const percent = total > 0 ? Math.min(100, Math.max(0, (consumed / total) * 100)) : 0;
+  const percent = total > 0 ? Math.min(100, Math.max(0, (remaining / total) * 100)) : 0;
 
   if (quotaFill) {
     quotaFill.style.width = `${percent}%`;
@@ -1186,16 +1198,30 @@ function renderQuota() {
       : copy[currentLang]["account.quotaEmpty"];
   }
   if (topupButton) {
-    topupButton.disabled = !isActiveMonthlyPlan(planId);
+    topupButton.disabled = !hasActiveMonthlyQuota();
   }
 }
 
 function updatePlanSelection() {
   const activePlan = accountState.quota && accountState.quota.planId ? accountState.quota.planId : "";
   const requestedPlan = new URLSearchParams(window.location.search).get("plan") || "";
+  const activeMonthlyQuota = hasActiveMonthlyQuota();
   document.querySelectorAll("[data-plan-id]").forEach((card) => {
     card.classList.toggle("is-current", Boolean(activePlan && card.dataset.planId === activePlan));
     card.classList.toggle("is-requested", Boolean(requestedPlan && card.dataset.planId === requestedPlan));
+    const button = card.querySelector("[data-checkout-product]");
+    if (!button) {
+      return;
+    }
+    const productId = button.dataset.checkoutProduct || "";
+    const isCurrentActivePlan = activeMonthlyQuota && productId === activePlan;
+    const isMonthlyChange = activeMonthlyQuota && isActiveMonthlyPlan(activePlan) && isActiveMonthlyPlan(productId);
+    button.disabled = isCurrentActivePlan;
+    button.textContent = isCurrentActivePlan
+      ? copy[currentLang]["plans.currentPlan"]
+      : isMonthlyChange
+        ? copy[currentLang]["plans.managePlan"]
+        : copy[currentLang]["plans.subscribe"];
   });
 }
 
@@ -1216,6 +1242,14 @@ function planName(planId) {
 
 function isActiveMonthlyPlan(planId) {
   return ["monthlyBasic", "monthlyPlus", "monthlyMax"].includes(planId);
+}
+
+function hasActiveMonthlyQuota() {
+  const quota = accountState.quota;
+  if (!quota || !isActiveMonthlyPlan(quota.planId)) {
+    return false;
+  }
+  return (quota.monthlyNonRolloverRemaining + quota.monthlyNonRolloverConsumed) > 0;
 }
 
 function formatNumber(value) {

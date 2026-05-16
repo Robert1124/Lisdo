@@ -200,6 +200,37 @@ def test_stripe_topup_checkout_requires_active_monthly_plan(load_lambda_handler,
     assert body["error"]["code"] == "topup_requires_monthly_plan"
 
 
+def test_stripe_checkout_does_not_create_duplicate_active_monthly_subscription(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    _install_fake_boto3(monkeypatch)
+    stripe_calls = _install_fake_stripe(monkeypatch)
+    handler = load_lambda_handler(
+        plan="monthlyMax",
+        monthly_quota=50,
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_prices={"monthlyMax": "price_monthly_max"},
+    )
+    invoke(handler, "GET", "/v1/quota", token="dev-token")
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/checkout/session",
+        token="dev-token",
+        body={"productId": "monthlyMax"},
+    )
+
+    assert response["statusCode"] == 400
+    assert body["error"]["code"] == "invalid_stripe_checkout"
+    assert "already active" in body["error"]["message"]
+    assert stripe_calls == []
+
+
 def test_stripe_subscription_invoice_webhook_grants_plan_quota_and_is_idempotent(
     load_lambda_handler,
     monkeypatch,
@@ -272,6 +303,96 @@ def test_stripe_subscription_invoice_webhook_grants_plan_quota_and_is_idempotent
     grants = _dynamodb_items(table, kind="quotaGrant")
     assert len(grants) == 1
     assert grants[0]["source"] == "stripe"
+    assert grants[0]["periodEnd"] == "2026-06-14T12:00:00Z"
+
+
+def test_stripe_subscription_invoice_webhook_accepts_current_invoice_shape(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={"monthlyMax": "price_monthly_max"},
+    )
+    _, auth_body = invoke(
+        handler,
+        "POST",
+        "/v1/auth/apple",
+        body={"identityToken": unsigned_apple_identity_token(subject="stripe-current-invoice-user")},
+        token=None,
+    )
+    account_id = auth_body["account"]["id"]
+    webhook_event = {
+        "id": "evt_invoice_payment_succeeded_1",
+        "type": "invoice.payment_succeeded",
+        "data": {
+            "object": {
+                "id": "in_2026_123",
+                "customer": "cus_2026",
+                "metadata": {},
+                "parent": {
+                    "subscription_details": {
+                        "metadata": {
+                            "accountId": account_id,
+                            "lisdoProductId": "monthlyMax",
+                        },
+                        "subscription": "sub_2026",
+                    },
+                    "type": "subscription_details",
+                },
+                "lines": {
+                    "data": [
+                        {
+                            "metadata": {
+                                "accountId": account_id,
+                                "lisdoProductId": "monthlyMax",
+                            },
+                            "period": {"end": 1781438400},
+                            "pricing": {
+                                "price_details": {
+                                    "price": "price_monthly_max",
+                                    "product": "prod_monthly_max",
+                                },
+                                "type": "price_details",
+                            },
+                            "parent": {
+                                "subscription_item_details": {
+                                    "subscription": "sub_2026",
+                                    "subscription_item": "si_2026",
+                                },
+                                "type": "subscription_item_details",
+                            },
+                        }
+                    ]
+                },
+            }
+        },
+    }
+    _install_fake_stripe(monkeypatch, webhook_events=[webhook_event])
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=webhook_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert body["eventType"] == "invoice.payment_succeeded"
+    assert_quota_snapshot(body["quota"], plan_id="monthlyMax", monthly_remaining=50000, topup_remaining=0)
+    table = dynamodb.Table("lisdo-test-quota")
+    grants = _dynamodb_items(table, kind="quotaGrant")
+    assert len(grants) == 1
+    assert grants[0]["stripeSubscriptionId"] == "sub_2026"
     assert grants[0]["periodEnd"] == "2026-06-14T12:00:00Z"
 
 
