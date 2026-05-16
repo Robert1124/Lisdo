@@ -34,6 +34,29 @@ def test_http_api_v2_health_returns_public_healthy_json(load_lambda_handler) -> 
     }
 
 
+def test_cors_preflight_returns_success_without_bearer_token(load_lambda_handler) -> None:
+    handler = load_lambda_handler(openai_api_key=None)
+
+    response, body = invoke(
+        handler,
+        "OPTIONS",
+        "/v1/auth/apple",
+        token=None,
+        headers={
+            "Origin": "https://lisdo.robertw.me",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    response_headers = {str(key).lower(): str(value) for key, value in response["headers"].items()}
+    assert response["statusCode"] == 200
+    assert body == {"status": "ok"}
+    assert response_headers["access-control-allow-origin"] == "*"
+    assert "POST" in response_headers["access-control-allow-methods"]
+    assert "content-type" in response_headers["access-control-allow-headers"]
+
+
 def test_bootstrap_with_dev_bearer_token_returns_account_session_entitlements_and_quota(
     load_lambda_handler,
 ) -> None:

@@ -29,8 +29,16 @@ from .stripe_checkout import (
     handle_webhook,
 )
 
+CORS_HEADERS = {
+    "Access-Control-Allow-Headers": "authorization,content-type,stripe-signature",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Max-Age": "300",
+}
+
 JSON_HEADERS = {
     "Content-Type": "application/json; charset=utf-8",
+    **CORS_HEADERS,
 }
 
 GPT5_MANAGED_MAX_COMPLETION_TOKENS = 3000
@@ -47,6 +55,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     config = load_config()
     request = _request_from_event(event)
     route = (request["method"], request["path"])
+
+    if request["method"] == "OPTIONS":
+        return _json_response(200, {"status": "ok"})
 
     authorized_config = config
     if route not in PUBLIC_ROUTES:
