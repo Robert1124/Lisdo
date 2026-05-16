@@ -1011,7 +1011,7 @@ def test_managed_draft_generation_uses_server_plan_model_and_sanitizes_client_re
         "model": "gpt-5.4-mini",
         "messages": body["chatRequest"]["messages"],
         "response_format": {"type": "json_object"},
-        "reasoning_effort": "minimal",
+        "reasoning_effort": "low",
         "max_completion_tokens": 3000,
     }
 

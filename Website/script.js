@@ -129,6 +129,9 @@ const copy = {
     "plans.checkoutOpening": "正在打开 Stripe Checkout...",
     "plans.checkoutFailed": "暂时无法打开 Checkout。请稍后再试。",
     "plans.checkoutSuccess": "购买成功。额度会在 webhook 验证后刷新。",
+    "plans.changeOpening": "正在更新套餐...",
+    "plans.changeUpgradeStarted": "套餐升级已提交。付款完成后额度会刷新。",
+    "plans.changeDowngradeScheduled": "套餐降级已安排，会在下个账单周期生效。",
     "plans.portalOpening": "正在打开 Stripe Billing Portal...",
     "plans.signInUnavailable": "网页 Sign in with Apple 尚未配置。请从 Lisdo app 打开此页面。",
     "plans.signInFailed": "Sign in with Apple 未完成。请重试。",
@@ -384,6 +387,9 @@ const copy = {
     "plans.checkoutOpening": "Opening Stripe Checkout...",
     "plans.checkoutFailed": "Checkout could not be opened right now. Try again later.",
     "plans.checkoutSuccess": "Purchase complete. Quota refreshes after webhook verification.",
+    "plans.changeOpening": "Updating plan...",
+    "plans.changeUpgradeStarted": "Plan upgrade started. Quota refreshes after payment completes.",
+    "plans.changeDowngradeScheduled": "Plan downgrade scheduled for the next billing period.",
     "plans.portalOpening": "Opening Stripe Billing Portal...",
     "plans.signInUnavailable": "Web Sign in with Apple is not configured yet. Open this page from the Lisdo app.",
     "plans.signInFailed": "Sign in with Apple did not complete. Try again.",
@@ -841,7 +847,7 @@ async function startCheckout(productId) {
       setCheckoutStatus("plans.checkoutReady");
       return;
     }
-    await openBillingPortal();
+    await changeSubscription(productId);
     return;
   }
   if (productId === "topUpUsage" && !hasActiveMonthlyQuota()) {
@@ -856,6 +862,22 @@ async function startCheckout(productId) {
       return;
     }
     throw new Error("missing checkout url");
+  } catch (error) {
+    setCheckoutStatus(error.message === "missing-session" ? "plans.checkoutNeedsSession" : "plans.checkoutFailed");
+  }
+}
+
+async function changeSubscription(productId) {
+  setCheckoutStatus("plans.changeOpening");
+  try {
+    const payload = await lisdoApiPost("/v1/stripe/subscription/change", { productId });
+    if (payload.status === "downgrade_scheduled") {
+      setCheckoutStatus("plans.changeDowngradeScheduled");
+    } else {
+      setCheckoutStatus("plans.changeUpgradeStarted");
+    }
+    await refreshAccountCenter();
+    setCheckoutStatus(payload.status === "downgrade_scheduled" ? "plans.changeDowngradeScheduled" : "plans.changeUpgradeStarted");
   } catch (error) {
     setCheckoutStatus(error.message === "missing-session" ? "plans.checkoutNeedsSession" : "plans.checkoutFailed");
   }

@@ -189,6 +189,7 @@ variable "api_route_keys" {
     "POST /v1/storekit/transactions/verify",
     "POST /v1/stripe/billing-portal/session",
     "POST /v1/stripe/checkout/session",
+    "POST /v1/stripe/subscription/change",
     "POST /v1/stripe/webhook",
     "$default"
   ]

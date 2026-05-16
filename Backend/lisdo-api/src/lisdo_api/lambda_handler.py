@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from typing import Any
 
 from . import providers
@@ -26,8 +27,11 @@ from .stripe_checkout import (
     StripeWebhookError,
     create_billing_portal_session,
     create_checkout_session,
+    create_subscription_change,
     handle_webhook,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 CORS_HEADERS = {
     "Access-Control-Allow-Headers": "authorization,content-type,stripe-signature",
@@ -223,6 +227,20 @@ def _dispatch(route: tuple[str, str], request: dict[str, Any], config: DevConfig
             raise InvalidRequest("invalid_stripe_portal", str(exc)) from exc
         return _json_response(200, session)
 
+    if route == ("POST", "/v1/stripe/subscription/change"):
+        body = _json_body(request)
+        product_id = body.get("productId")
+        try:
+            change = create_subscription_change(
+                config,
+                product_id=product_id if isinstance(product_id, str) else "",
+            )
+        except StripeConfigurationError as exc:
+            return _error_response(503, "stripe_not_configured", str(exc))
+        except StripeCheckoutError as exc:
+            raise InvalidRequest("invalid_stripe_subscription_change", str(exc)) from exc
+        return _json_response(200, change)
+
     if route == ("POST", "/v1/stripe/webhook"):
         try:
             result = handle_webhook(
@@ -283,7 +301,16 @@ def _handle_generate_draft(request: dict[str, Any], config: DevConfig) -> dict[s
     managed_request = _managed_draft_chat_request(chat_request, state.plan_id)
     try:
         provider_result = providers.generate_draft(managed_request)
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning(
+            "managed_draft_provider_error",
+            extra={
+                "providerErrorType": type(exc).__name__,
+                "planId": state.plan_id,
+                "model": managed_request.get("model"),
+            },
+            exc_info=True,
+        )
         return _json_response(
             502,
             {
@@ -340,7 +367,7 @@ def _managed_draft_chat_request(chat_request: dict[str, Any], plan_id: str) -> d
         "response_format": {"type": "json_object"},
     }
     if _uses_reasoning_effort(model):
-        managed_request["reasoning_effort"] = "minimal"
+        managed_request["reasoning_effort"] = _reasoning_effort_for_model(model)
     elif not _uses_fixed_sampling(model):
         managed_request["temperature"] = _bounded_float(chat_request.get("temperature"), default=0.1, minimum=0.0, maximum=0.4)
 
@@ -357,6 +384,13 @@ def _managed_draft_chat_request(chat_request: dict[str, Any], plan_id: str) -> d
 def _uses_reasoning_effort(model: str) -> bool:
     normalized = model.lower()
     return normalized.startswith("gpt-5")
+
+
+def _reasoning_effort_for_model(model: str) -> str:
+    normalized = model.lower()
+    if normalized.startswith("gpt-5.4"):
+        return "low"
+    return "minimal"
 
 
 def _uses_fixed_sampling(model: str) -> bool:

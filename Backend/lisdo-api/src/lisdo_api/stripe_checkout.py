@@ -89,6 +89,12 @@ PRODUCTS: dict[str, StripeProduct] = {
     ),
 }
 
+MONTHLY_PRODUCT_ORDER = {
+    "monthlyBasic": 1,
+    "monthlyPlus": 2,
+    "monthlyMax": 3,
+}
+
 _SECRET_CACHE: dict[str, str] = {}
 
 
@@ -170,6 +176,116 @@ def create_billing_portal_session(config: DevConfig, *, return_url: str | None =
     }
 
 
+def create_subscription_change(config: DevConfig, *, product_id: str) -> dict[str, Any]:
+    target_product = _product_for_id(product_id)
+    if target_product.mode != "subscription" or target_product.plan_id is None:
+        raise StripeCheckoutError("Only monthly subscriptions can be changed this way.")
+
+    state = load_state(config)
+    if not is_active_monthly_plan(state.plan_id) or state.monthly_limit <= 0:
+        raise StripeCheckoutError("This account does not have an active monthly subscription.")
+    if target_product.plan_id == state.plan_id:
+        return {
+            "status": "already_active",
+            "productId": target_product.product_id,
+            "planId": target_product.plan_id,
+            "quota": state.snapshot(),
+        }
+
+    current_product = _product_for_plan(state.plan_id)
+    if current_product is None:
+        raise StripeCheckoutError("The active plan cannot be changed through Stripe.")
+
+    customer_id = stripe_customer_id_for_account(config)
+    if customer_id is None:
+        raise StripeCheckoutError("This account does not have Stripe billing history yet.")
+
+    stripe = _configured_stripe(_stripe_secret_key(config))
+    subscription, item = _active_monthly_subscription_item(config, stripe, customer_id)
+    subscription_id = _required_string(subscription, "id")
+    item_id = _required_string(item, "id")
+    quantity = _subscription_item_quantity(item)
+    metadata = {
+        "accountId": config.account_id,
+        "lisdoProductId": target_product.product_id,
+    }
+
+    if _monthly_rank(target_product) > _monthly_rank(current_product):
+        try:
+            updated_subscription = stripe.Subscription.modify(
+                subscription_id,
+                items=[
+                    {
+                        "id": item_id,
+                        "price": _price_id(config, target_product),
+                        "quantity": quantity,
+                    }
+                ],
+                metadata=metadata,
+                payment_behavior="pending_if_incomplete",
+                proration_behavior="always_invoice",
+            )
+        except Exception as exc:
+            raise StripeCheckoutError("Stripe subscription upgrade could not be started.") from exc
+        return {
+            "status": "upgrade_started",
+            "productId": target_product.product_id,
+            "planId": target_product.plan_id,
+            "subscriptionId": _required_string(updated_subscription, "id"),
+            "quota": state.snapshot(),
+        }
+
+    effective_at = _subscription_period_end(subscription)
+    if effective_at is None:
+        raise StripeCheckoutError("Stripe subscription is missing its current period end.")
+    schedule_id = _subscription_schedule_id(subscription)
+    try:
+        if schedule_id is None:
+            schedule = stripe.SubscriptionSchedule.create(from_subscription=subscription_id)
+            schedule_id = _required_string(schedule, "id")
+        scheduled = stripe.SubscriptionSchedule.modify(
+            schedule_id,
+            end_behavior="release",
+            metadata=metadata,
+            phases=[
+                {
+                    "items": [
+                        {
+                            "price": _price_id(config, current_product),
+                            "quantity": quantity,
+                        }
+                    ],
+                    "start_date": _subscription_period_start(subscription) or "now",
+                    "end_date": effective_at,
+                    "proration_behavior": "none",
+                },
+                {
+                    "items": [
+                        {
+                            "price": _price_id(config, target_product),
+                            "quantity": quantity,
+                        }
+                    ],
+                    "start_date": effective_at,
+                    "iterations": 1,
+                    "proration_behavior": "none",
+                    "metadata": metadata,
+                },
+            ],
+        )
+    except Exception as exc:
+        raise StripeCheckoutError("Stripe subscription downgrade could not be scheduled.") from exc
+
+    return {
+        "status": "downgrade_scheduled",
+        "productId": target_product.product_id,
+        "planId": target_product.plan_id,
+        "subscriptionScheduleId": _required_string(scheduled, "id"),
+        "effectiveAt": _unix_timestamp_to_iso(effective_at) or str(effective_at),
+        "quota": state.snapshot(),
+    }
+
+
 def handle_webhook(config: DevConfig, *, payload: bytes, signature: str | None) -> dict[str, Any]:
     webhook_secret = _stripe_webhook_secret(config)
     if not signature:
@@ -243,14 +359,17 @@ def _handle_checkout_completed(config: DevConfig, event_type: str, session: Any)
 
 
 def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> dict[str, Any]:
-    price_id, period_end = _invoice_price_and_period_end(invoice)
-    product = _product_for_price(config, price_id)
+    product, period_end = _invoice_product_and_period_end(config, invoice)
     customer_id = _required_string(invoice, "customer")
     account_id = _account_id_from_invoice(config, invoice, customer_id)
     if not account_id:
         raise StripeWebhookError("Stripe invoice is missing account metadata.")
     account_config = config_for_account(config, account_id)
     attach_stripe_customer(account_config, customer_id)
+    monthly_quota = product.monthly_quota
+    if _optional_string(invoice, "billing_reason") == "subscription_update" and product.kind == "autoRenewableSubscription":
+        current_state = load_state(account_config)
+        monthly_quota = max(0, product.monthly_quota - current_state.monthly_limit)
 
     state = apply_external_billing_grant(
         account_config,
@@ -259,7 +378,7 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
         product_id=product.product_id,
         product_kind=product.kind,
         plan_id=product.plan_id,
-        monthly_quota=product.monthly_quota,
+        monthly_quota=monthly_quota,
         topup_quota=product.topup_quota,
         period_end=period_end,
         customer_id=customer_id,
@@ -272,6 +391,25 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
     }
 
 
+def _invoice_product_and_period_end(config: DevConfig, invoice: Any) -> tuple[StripeProduct, str | None]:
+    metadata_product_id = _product_id_from_invoice_metadata(invoice)
+    if metadata_product_id is not None:
+        product = PRODUCTS.get(metadata_product_id)
+        if product is not None:
+            return product, _invoice_period_end(invoice)
+
+    price_id, period_end = _invoice_price_and_period_end(invoice)
+    return _product_for_price(config, price_id), period_end
+
+
+def _product_id_from_invoice_metadata(invoice: Any) -> str | None:
+    for metadata in _invoice_metadata_candidates(invoice):
+        product_id = metadata.get("lisdoProductId")
+        if product_id:
+            return product_id
+    return None
+
+
 def _invoice_price_and_period_end(invoice: Any) -> tuple[str, str | None]:
     for line_item in _invoice_line_items(invoice):
         price_id = _price_id_from_invoice_line(line_item)
@@ -280,6 +418,15 @@ def _invoice_price_and_period_end(invoice: Any) -> tuple[str, str | None]:
             period_end = _object_value(period, "end")
             return price_id, _unix_timestamp_to_iso(period_end)
     raise StripeWebhookError("Stripe invoice line is missing a configured price.")
+
+
+def _invoice_period_end(invoice: Any) -> str | None:
+    for line_item in _invoice_line_items(invoice):
+        period = _object_value(line_item, "period")
+        period_end = _unix_timestamp_to_iso(_object_value(period, "end"))
+        if period_end is not None:
+            return period_end
+    return None
 
 
 def _invoice_line_items(invoice: Any) -> list[Any]:
@@ -365,11 +512,83 @@ def _product_for_price(config: DevConfig, price_id: str) -> StripeProduct:
     raise StripeWebhookError("Stripe price is not configured for Lisdo.")
 
 
+def _product_for_plan(plan_id: str) -> StripeProduct | None:
+    normalized_plan = normalize_plan(plan_id)
+    for product in PRODUCTS.values():
+        if product.plan_id == normalized_plan:
+            return product
+    return None
+
+
+def _monthly_rank(product: StripeProduct) -> int:
+    return MONTHLY_PRODUCT_ORDER.get(product.product_id, 0)
+
+
 def _price_id(config: DevConfig, product: StripeProduct) -> str:
     value = getattr(config, product.price_config_attr)
     if not isinstance(value, str) or not value:
         raise StripeConfigurationError(f"Missing Stripe price for {product.product_id}.")
     return value
+
+
+def _active_monthly_subscription_item(config: DevConfig, stripe: Any, customer_id: str) -> tuple[Any, Any]:
+    configured_monthly_prices = {
+        _price_id(config, product)
+        for product in PRODUCTS.values()
+        if product.mode == "subscription"
+    }
+    try:
+        subscriptions = stripe.Subscription.list(
+            customer=customer_id,
+            status="all",
+            limit=20,
+            expand=["data.items.data.price"],
+        )
+    except Exception as exc:
+        raise StripeCheckoutError("Stripe subscription could not be loaded.") from exc
+
+    for subscription in _object_list(subscriptions, "data"):
+        if _optional_string(subscription, "status") not in {"active", "trialing", "past_due", "unpaid"}:
+            continue
+        items = _object_value(subscription, "items")
+        for item in _object_list(items, "data"):
+            price_id = _price_id_from_subscription_item(item)
+            if price_id in configured_monthly_prices:
+                return subscription, item
+    raise StripeCheckoutError("No active Stripe monthly subscription was found for this account.")
+
+
+def _price_id_from_subscription_item(item: Any) -> str | None:
+    price = _object_value(item, "price")
+    if isinstance(price, str) and price:
+        return price
+    price_id = _object_value(price, "id")
+    return price_id if isinstance(price_id, str) and price_id else None
+
+
+def _subscription_item_quantity(item: Any) -> int:
+    quantity = _object_value(item, "quantity")
+    if isinstance(quantity, bool):
+        return 1
+    if isinstance(quantity, int) and quantity > 0:
+        return quantity
+    return 1
+
+
+def _subscription_period_start(subscription: Any) -> Any:
+    return _object_value(subscription, "current_period_start")
+
+
+def _subscription_period_end(subscription: Any) -> Any:
+    return _object_value(subscription, "current_period_end")
+
+
+def _subscription_schedule_id(subscription: Any) -> str | None:
+    schedule = _object_value(subscription, "schedule")
+    if isinstance(schedule, str) and schedule:
+        return schedule
+    schedule_id = _object_value(schedule, "id")
+    return schedule_id if isinstance(schedule_id, str) and schedule_id else None
 
 
 def _configured_stripe(secret_key: str) -> Any:
@@ -462,6 +681,13 @@ def _object_value(obj: Any, key: str) -> Any:
         return obj[key]
     except (AttributeError, KeyError, TypeError):
         return None
+
+
+def _object_list(obj: Any, key: str) -> list[Any]:
+    values = _object_value(obj, key)
+    if isinstance(values, list):
+        return [value for value in values if value is not None]
+    return []
 
 
 def _nonempty(value: str | None) -> str | None:

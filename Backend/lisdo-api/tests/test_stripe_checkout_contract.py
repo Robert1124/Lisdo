@@ -29,10 +29,12 @@ def _install_fake_stripe(
     monkeypatch,
     *,
     webhook_events: list[dict[str, Any]] | None = None,
+    subscriptions: list[dict[str, Any]] | None = None,
     session_returns_stripe_object: bool = False,
 ) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     events = list(webhook_events or [])
+    subscription_items = list(subscriptions or [])
 
     class FakeSession:
         @staticmethod
@@ -55,6 +57,31 @@ def _install_fake_stripe(
                 "url": "https://billing.stripe.test/session/bps_test_123",
             }
 
+    class FakeSubscription:
+        @staticmethod
+        def list(**kwargs: Any) -> dict[str, Any]:
+            calls.append({"subscriptionList": kwargs})
+            return {"data": subscription_items}
+
+        @staticmethod
+        def modify(subscription_id: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"subscriptionModify": {"id": subscription_id, **kwargs}})
+            return {
+                "id": subscription_id,
+                "status": "active",
+            }
+
+    class FakeSubscriptionSchedule:
+        @staticmethod
+        def create(**kwargs: Any) -> dict[str, Any]:
+            calls.append({"scheduleCreate": kwargs})
+            return {"id": "sched_test_123"}
+
+        @staticmethod
+        def modify(schedule_id: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"scheduleModify": {"id": schedule_id, **kwargs}})
+            return {"id": schedule_id}
+
     class FakeWebhook:
         @staticmethod
         def construct_event(payload: bytes | str, sig_header: str, secret: str) -> dict[str, Any]:
@@ -68,6 +95,8 @@ def _install_fake_stripe(
         api_version=None,
         checkout=types.SimpleNamespace(Session=FakeSession),
         billing_portal=types.SimpleNamespace(Session=FakePortalSession),
+        Subscription=FakeSubscription,
+        SubscriptionSchedule=FakeSubscriptionSchedule,
         Webhook=FakeWebhook,
         error=types.SimpleNamespace(
             StripeError=_FakeStripeError,
@@ -229,6 +258,316 @@ def test_stripe_checkout_does_not_create_duplicate_active_monthly_subscription(
     assert body["error"]["code"] == "invalid_stripe_checkout"
     assert "already active" in body["error"]["message"]
     assert stripe_calls == []
+
+
+def test_stripe_subscription_upgrade_updates_immediately_and_delta_quota_arrives_on_invoice(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyBasic",
+            "userId": "test-user",
+            "stripeCustomerId": "cus_upgrade",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#stripe#basic",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 3000,
+            "consumed": 1800,
+            "source": "stripe",
+            "productId": "monthlyBasic",
+            "externalEventId": "basic",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-06-14T12:00:00Z",
+            "stripeCustomerId": "cus_upgrade",
+            "stripeSubscriptionId": "sub_upgrade",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": "STRIPE_CUSTOMER#cus_upgrade",
+            "sk": "META",
+            "kind": "stripeCustomerIndex",
+            "accountId": account_id,
+            "createdAt": "2026-05-14T12:00:00Z",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    upgrade_invoice_event = {
+        "id": "evt_upgrade_invoice_paid",
+        "type": "invoice.payment_succeeded",
+        "data": {
+            "object": {
+                "id": "in_upgrade_123",
+                "customer": "cus_upgrade",
+                "subscription": "sub_upgrade",
+                "billing_reason": "subscription_update",
+                "parent": {
+                    "subscription_details": {
+                        "metadata": {
+                            "accountId": account_id,
+                            "lisdoProductId": "monthlyMax",
+                        },
+                        "subscription": "sub_upgrade",
+                    }
+                },
+                "lines": {
+                    "data": [
+                        {
+                            "period": {"end": 1781438400},
+                            "pricing": {
+                                "price_details": {
+                                    "price": "price_monthly_max",
+                                }
+                            },
+                        }
+                    ]
+                },
+            }
+        },
+    }
+    stripe_calls = _install_fake_stripe(
+        monkeypatch,
+        webhook_events=[upgrade_invoice_event],
+        subscriptions=[
+            {
+                "id": "sub_upgrade",
+                "status": "active",
+                "current_period_start": 1778760000,
+                "current_period_end": 1781438400,
+                "items": {
+                    "data": [
+                        {
+                            "id": "si_upgrade",
+                            "quantity": 1,
+                            "price": {"id": "price_monthly_basic"},
+                        }
+                    ]
+                },
+            }
+        ],
+    )
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={
+            "monthlyBasic": "price_monthly_basic",
+            "monthlyPlus": "price_monthly_plus",
+            "monthlyMax": "price_monthly_max",
+        },
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/subscription/change",
+        token="dev-token",
+        body={"productId": "monthlyMax"},
+    )
+    webhook_response, webhook_body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=upgrade_invoice_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "upgrade_started"
+    assert stripe_calls[0] == {
+        "subscriptionList": {
+            "customer": "cus_upgrade",
+            "status": "all",
+            "limit": 20,
+            "expand": ["data.items.data.price"],
+        }
+    }
+    assert stripe_calls[1] == {
+        "subscriptionModify": {
+            "id": "sub_upgrade",
+            "items": [
+                {
+                    "id": "si_upgrade",
+                    "price": "price_monthly_max",
+                    "quantity": 1,
+                }
+            ],
+            "metadata": {
+                "accountId": account_id,
+                "lisdoProductId": "monthlyMax",
+            },
+            "payment_behavior": "pending_if_incomplete",
+            "proration_behavior": "always_invoice",
+        }
+    }
+    assert webhook_response["statusCode"] == 200
+    assert_quota_snapshot(
+        webhook_body["quota"],
+        plan_id="monthlyMax",
+        monthly_remaining=48200,
+        topup_remaining=0,
+        monthly_consumed=1800,
+    )
+
+    grants = _dynamodb_items(table, kind="quotaGrant")
+    assert [grant["quantity"] for grant in grants] == [3000, 47000]
+    assert [grant["consumed"] for grant in grants] == [1800, 0]
+
+
+def test_stripe_subscription_downgrade_is_scheduled_for_next_period(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyMax",
+            "userId": "test-user",
+            "stripeCustomerId": "cus_downgrade",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#stripe#max",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 50000,
+            "consumed": 1200,
+            "source": "stripe",
+            "productId": "monthlyMax",
+            "externalEventId": "max",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-06-14T12:00:00Z",
+            "stripeCustomerId": "cus_downgrade",
+            "stripeSubscriptionId": "sub_downgrade",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": "STRIPE_CUSTOMER#cus_downgrade",
+            "sk": "META",
+            "kind": "stripeCustomerIndex",
+            "accountId": account_id,
+            "createdAt": "2026-05-14T12:00:00Z",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    stripe_calls = _install_fake_stripe(
+        monkeypatch,
+        subscriptions=[
+            {
+                "id": "sub_downgrade",
+                "status": "active",
+                "current_period_start": 1778760000,
+                "current_period_end": 1781438400,
+                "items": {
+                    "data": [
+                        {
+                            "id": "si_downgrade",
+                            "quantity": 1,
+                            "price": {"id": "price_monthly_max"},
+                        }
+                    ]
+                },
+            }
+        ],
+    )
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_prices={
+            "monthlyBasic": "price_monthly_basic",
+            "monthlyPlus": "price_monthly_plus",
+            "monthlyMax": "price_monthly_max",
+        },
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/subscription/change",
+        token="dev-token",
+        body={"productId": "monthlyBasic"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "downgrade_scheduled"
+    assert body["effectiveAt"] == "2026-06-14T12:00:00Z"
+    assert_quota_snapshot(
+        body["quota"],
+        plan_id="monthlyMax",
+        monthly_remaining=48800,
+        topup_remaining=0,
+        monthly_consumed=1200,
+    )
+    assert stripe_calls[1] == {"scheduleCreate": {"from_subscription": "sub_downgrade"}}
+    assert stripe_calls[2] == {
+        "scheduleModify": {
+            "id": "sched_test_123",
+            "end_behavior": "release",
+            "metadata": {
+                "accountId": account_id,
+                "lisdoProductId": "monthlyBasic",
+            },
+            "phases": [
+                {
+                    "items": [
+                        {
+                            "price": "price_monthly_max",
+                            "quantity": 1,
+                        }
+                    ],
+                    "start_date": 1778760000,
+                    "end_date": 1781438400,
+                    "proration_behavior": "none",
+                },
+                {
+                    "items": [
+                        {
+                            "price": "price_monthly_basic",
+                            "quantity": 1,
+                        }
+                    ],
+                    "start_date": 1781438400,
+                    "iterations": 1,
+                    "proration_behavior": "none",
+                    "metadata": {
+                        "accountId": account_id,
+                        "lisdoProductId": "monthlyBasic",
+                    },
+                },
+            ],
+        }
+    }
 
 
 def test_stripe_subscription_invoice_webhook_grants_plan_quota_and_is_idempotent(
