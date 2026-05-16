@@ -63,6 +63,8 @@ PRODUCTS: dict[str, StoreKitProduct] = {
 
 LOCAL_STOREKIT_ENVIRONMENTS = frozenset({"Xcode", "LocalTesting"})
 STOREKIT_VERIFICATION_MODES = frozenset({"client-verified", "server-jws", "disabled"})
+STOREKIT_GRANT_NOTIFICATION_TYPES = frozenset({"INITIAL_BUY", "DID_RENEW", "DID_RECOVER", "SUBSCRIBED"})
+STOREKIT_REVOKE_NOTIFICATION_TYPES = frozenset({"EXPIRED", "REFUND", "REVOKE"})
 
 
 def parse_verified_transaction(
@@ -89,6 +91,60 @@ def parse_verified_transaction(
             allow_xcode_environment=allow_xcode_environment,
         )
     return _parse_client_verified_transaction(body)
+
+
+def parse_server_notification(
+    body: dict[str, Any],
+    *,
+    verification_mode: str,
+    bundle_ids: tuple[str, ...] = (),
+    app_apple_id: int | None = None,
+    root_certificates_dir: str | None = None,
+    enable_online_checks: bool = False,
+    allow_xcode_environment: bool = False,
+) -> dict[str, Any]:
+    if verification_mode != "server-jws":
+        raise StoreKitTransactionError("StoreKit server notifications require server-jws verification.")
+
+    signed_payload = _required_string(body, "signedPayload")
+    unverified_payload = _decode_jws_payload(signed_payload)
+    unverified_data = _notification_data(unverified_payload)
+    environment = _payload_environment(unverified_data)
+    if environment in LOCAL_STOREKIT_ENVIRONMENTS and not allow_xcode_environment:
+        raise StoreKitTransactionError("Local StoreKit notifications are not accepted in this environment.")
+
+    decoded_payload = _verify_signed_notification(
+        signed_payload,
+        environment=environment,
+        bundle_ids=bundle_ids,
+        app_apple_id=app_apple_id,
+        root_certificates_dir=root_certificates_dir,
+        enable_online_checks=enable_online_checks,
+    )
+    notification_type = _payload_required_string(decoded_payload, "notificationType")
+    notification_uuid = _payload_optional_string(decoded_payload, "notificationUUID") or notification_type
+    decoded_data = _notification_data(decoded_payload)
+    action = _notification_action(notification_type)
+    signed_transaction = _payload_optional_string(decoded_data, "signedTransactionInfo")
+    transaction = None
+    if action in {"grant", "revoke"}:
+        if signed_transaction is None:
+            raise StoreKitTransactionError("StoreKit notification is missing signedTransactionInfo.")
+        transaction = _parse_server_jws_transaction(
+            {"signedTransactionInfo": signed_transaction},
+            bundle_ids=bundle_ids,
+            app_apple_id=app_apple_id,
+            root_certificates_dir=root_certificates_dir,
+            enable_online_checks=enable_online_checks,
+            allow_xcode_environment=allow_xcode_environment,
+        )
+
+    return {
+        "notificationType": notification_type,
+        "notificationUUID": notification_uuid,
+        "action": action,
+        "transaction": transaction,
+    }
 
 
 def _parse_client_verified_transaction(body: dict[str, Any]) -> dict[str, Any]:
@@ -203,6 +259,59 @@ def _verify_signed_transaction(
     raise StoreKitTransactionError(f"StoreKit transaction could not be verified{detail}.")
 
 
+def _verify_signed_notification(
+    signed_payload: str,
+    *,
+    environment: str,
+    bundle_ids: tuple[str, ...],
+    app_apple_id: int | None,
+    root_certificates_dir: str | None,
+    enable_online_checks: bool,
+) -> Any:
+    if not bundle_ids:
+        raise StoreKitTransactionError("StoreKit bundle IDs are not configured.")
+    if environment == "Production" and app_apple_id is None:
+        raise StoreKitTransactionError("StoreKit appAppleId is required for Production notifications.")
+
+    try:
+        from appstoreserverlibrary.models.Environment import Environment
+        from appstoreserverlibrary.signed_data_verifier import SignedDataVerifier, VerificationException
+    except ImportError as exc:
+        raise StoreKitTransactionError("App Store Server Library is not packaged.") from exc
+
+    try:
+        verifier_environment = Environment(environment)
+    except ValueError as exc:
+        raise StoreKitTransactionError("StoreKit notification environment is not supported.") from exc
+
+    root_certificates = (
+        []
+        if environment in LOCAL_STOREKIT_ENVIRONMENTS
+        else _load_root_certificates(root_certificates_dir)
+    )
+    failures: list[str] = []
+    for bundle_id in bundle_ids:
+        verifier = SignedDataVerifier(
+            root_certificates,
+            enable_online_checks,
+            verifier_environment,
+            bundle_id,
+            app_apple_id,
+        )
+        try:
+            method = getattr(verifier, "verify_and_decode_notification", None)
+            if method is None:
+                method = getattr(verifier, "verify_and_decode_signed_notification", None)
+            if method is None:
+                raise StoreKitTransactionError("App Store Server Library cannot verify notifications.")
+            return method(signed_payload)
+        except VerificationException as exc:
+            failures.append(str(exc))
+
+    detail = f" ({'; '.join(failures)})" if failures else ""
+    raise StoreKitTransactionError(f"StoreKit notification could not be verified{detail}.")
+
+
 def _transaction_result(
     *,
     product: StoreKitProduct,
@@ -290,6 +399,21 @@ def _payload_environment(payload: Any) -> str:
     if isinstance(value, str) and value.strip():
         return value.strip()
     raise StoreKitTransactionError("StoreKit transaction is missing environment.")
+
+
+def _notification_data(payload: Any) -> Any:
+    data = _payload_value(payload, "data")
+    if data is None:
+        raise StoreKitTransactionError("StoreKit notification data is missing.")
+    return data
+
+
+def _notification_action(notification_type: str) -> str:
+    if notification_type in STOREKIT_GRANT_NOTIFICATION_TYPES:
+        return "grant"
+    if notification_type in STOREKIT_REVOKE_NOTIFICATION_TYPES:
+        return "revoke"
+    return "ignored"
 
 
 def _payload_millis_to_iso(payload: Any, key: str) -> str | None:

@@ -204,6 +204,28 @@ final class AdvancedCoreHelpersTests: XCTestCase {
         XCTAssertEqual(open.blocks?.map(\.checked), [true, true])
     }
 
+    func testSavedTodoCompletionToggleChecksOnlyCheckboxBlocks() {
+        let toggleDate = date(year: 2026, month: 5, day: 4, hour: 9)
+        let checkbox = TodoBlock(todoId: UUID(), type: .checkbox, content: "Send questionnaire", checked: false, order: 0)
+        let bullet = TodoBlock(todoId: UUID(), type: .bullet, content: "Source email context", checked: false, order: 1)
+        let note = TodoBlock(todoId: UUID(), type: .note, content: "Ask Yan before finalizing", checked: false, order: 2)
+        let open = Todo(
+            categoryId: "work",
+            title: "Open todo",
+            status: .open,
+            updatedAt: date(year: 2026, month: 5, day: 1),
+            blocks: [checkbox, bullet, note]
+        )
+
+        CaptureBatchActions.toggleSavedTodoCompletion(open, updatedAt: toggleDate)
+
+        XCTAssertEqual(open.status, .completed)
+        XCTAssertEqual(open.updatedAt, toggleDate)
+        XCTAssertEqual(checkbox.checked, true)
+        XCTAssertEqual(bullet.checked, false)
+        XCTAssertEqual(note.checked, false)
+    }
+
     func testDeletionPolicyAllowsDraftAndCaptureCleanupWithoutTouchingApprovedTodos() {
         let readyCapture = makeCapture(status: .processedDraft)
         let approvedCapture = makeCapture(status: .approvedTodo)

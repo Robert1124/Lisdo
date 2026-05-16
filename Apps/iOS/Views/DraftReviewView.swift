@@ -8,6 +8,8 @@ struct DraftReviewView: View {
     @EnvironmentObject private var entitlementStore: LisdoEntitlementStore
     @Query private var captures: [CaptureItem]
 
+    private let accountSessionService = LisdoAccountSessionService()
+
     var draft: ProcessingDraft
     var categories: [Category]
     var sourceText: String
@@ -19,7 +21,9 @@ struct DraftReviewView: View {
     @State private var dueDateText: String
     @State private var dateMode: LisdoIOSDraftDateMode
     @State private var selectedDate: Date
-    @State private var blocks: [DraftBlock]
+    @State private var checklistBlocks: [DraftBlock]
+    @State private var noteText: String
+    @State private var showsNoteEditor: Bool
     @State private var suggestedReminders: [DraftReminderSuggestion]
     @State private var showSource = true
     @State private var saveError: String?
@@ -45,7 +49,11 @@ struct DraftReviewView: View {
             _dateMode = State(initialValue: .none)
             _selectedDate = State(initialValue: Date())
         }
-        _blocks = State(initialValue: draft.blocks.sorted { $0.order < $1.order })
+        let sortedBlocks = draft.blocks.sorted { $0.order < $1.order }
+        let initialNoteText = Self.noteText(from: sortedBlocks)
+        _checklistBlocks = State(initialValue: sortedBlocks.filter { $0.type == .checkbox })
+        _noteText = State(initialValue: initialNoteText)
+        _showsNoteEditor = State(initialValue: !initialNoteText.isEmpty)
         _suggestedReminders = State(initialValue: draft.suggestedReminders.sorted { $0.order < $1.order })
     }
 
@@ -53,6 +61,7 @@ struct DraftReviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    sourceSection
                     categorySection
                     editorSection
                     reviseSection
@@ -185,7 +194,7 @@ struct DraftReviewView: View {
                         .foregroundStyle(LisdoTheme.ink3)
                     Spacer()
                     Button {
-                        blocks.append(DraftBlock(type: .checkbox, content: "", order: blocks.count))
+                        checklistBlocks.append(DraftBlock(type: .checkbox, content: "", order: checklistBlocks.count))
                     } label: {
                         Label("Add step", systemImage: "plus")
                     }
@@ -193,7 +202,7 @@ struct DraftReviewView: View {
                     .foregroundStyle(LisdoTheme.ink2)
                 }
 
-                ForEach(blocks.indices, id: \.self) { index in
+                ForEach(checklistBlocks.indices, id: \.self) { index in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Circle()
                             .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
@@ -202,7 +211,7 @@ struct DraftReviewView: View {
                             .alignmentGuide(.firstTextBaseline) { dimensions in
                                 dimensions[VerticalAlignment.center] + 2
                             }
-                        TextField("Checklist item", text: blockBinding(at: index), axis: .vertical)
+                        TextField("Checklist item", text: checklistBlockBinding(at: index), axis: .vertical)
                             .font(.system(size: 14))
                             .foregroundStyle(LisdoTheme.ink1)
                             .textFieldStyle(.plain)
@@ -210,12 +219,16 @@ struct DraftReviewView: View {
 
                         LisdoInlineDeleteButton(
                             accessibilityLabel: "Delete checklist item",
-                            action: { deleteBlock(at: index) }
+                            action: { deleteChecklistBlock(at: index) }
                         )
                     }
                     .padding(.vertical, 3)
                 }
             }
+
+            Divider()
+
+            noteSection
 
             Divider()
 
@@ -390,11 +403,54 @@ struct DraftReviewView: View {
         draft.confidence.map { "\(Int($0 * 100))%" }
     }
 
-    private func blockBinding(at index: Int) -> Binding<String> {
+    private var noteSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Note")
+                    .font(.system(size: 11, weight: .medium))
+                    .tracking(0.8)
+                    .foregroundStyle(LisdoTheme.ink3)
+                Spacer()
+                if showsNoteEditor {
+                    Button {
+                        noteText = ""
+                        showsNoteEditor = false
+                    } label: {
+                        Label("Remove note", systemImage: "trash")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(LisdoTheme.ink2)
+                } else {
+                    Button {
+                        showsNoteEditor = true
+                    } label: {
+                        Label("Add note", systemImage: "note.text.badge.plus")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(LisdoTheme.ink2)
+                }
+            }
+
+            if showsNoteEditor {
+                TextField("Optional note", text: $noteText, axis: .vertical)
+                    .font(.system(size: 14))
+                    .lineLimit(3...9)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .background(LisdoTheme.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(LisdoTheme.divider.opacity(0.78), lineWidth: 1)
+                    }
+            }
+        }
+    }
+
+    private func checklistBlockBinding(at index: Int) -> Binding<String> {
         Binding {
-            blocks[index].content
+            checklistBlocks[index].content
         } set: { newValue in
-            blocks[index].content = newValue
+            checklistBlocks[index].content = newValue
         }
     }
 
@@ -479,9 +535,9 @@ struct DraftReviewView: View {
         }
     }
 
-    private func reorderBlocks() {
-        for index in blocks.indices {
-            blocks[index].order = index
+    private func reorderChecklistBlocks() {
+        for index in checklistBlocks.indices {
+            checklistBlocks[index].order = index
         }
     }
 
@@ -491,10 +547,10 @@ struct DraftReviewView: View {
         }
     }
 
-    private func deleteBlock(at index: Int) {
-        guard blocks.indices.contains(index) else { return }
-        blocks.remove(at: index)
-        reorderBlocks()
+    private func deleteChecklistBlock(at index: Int) {
+        guard checklistBlocks.indices.contains(index) else { return }
+        checklistBlocks.remove(at: index)
+        reorderChecklistBlocks()
     }
 
     private func deleteReminder(at index: Int) {
@@ -505,19 +561,13 @@ struct DraftReviewView: View {
 
     private func saveAsTodo() {
         saveError = nil
-        reorderBlocks()
+        reorderChecklistBlocks()
         reorderReminders()
         draft.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         draft.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         syncDateEdits()
         draft.recommendedCategoryId = selectedCategoryId
-        draft.blocks = blocks
-            .map { block in
-                var copy = block
-                copy.content = copy.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                return copy
-            }
-            .filter { !$0.content.isEmpty }
+        draft.blocks = sanitizedDraftBlocks()
         draft.suggestedReminders = sanitizedReminders()
 
         do {
@@ -624,7 +674,8 @@ struct DraftReviewView: View {
                 summary = draft.summary ?? ""
                 dueDateText = draft.dueDateText ?? ""
                 loadDateState(from: draft)
-                blocks = draft.blocks.sorted { $0.order < $1.order }
+                loadBlockState(from: draft)
+                draft.blocks = sanitizedDraftBlocks()
                 suggestedReminders = draft.suggestedReminders.sorted { $0.order < $1.order }
                 revisionInstructions = ""
                 try modelContext.save()
@@ -646,16 +697,27 @@ struct DraftReviewView: View {
 
     private func canUseManagedRevision(mode: ProviderMode) -> Bool {
         guard mode == .lisdoManaged else { return true }
-        return entitlementStore.effectiveSnapshot.consumingDraftUnits(1).isAllowed
+        return managedRevisionGateDecision == .allowed
+    }
+
+    private var managedRevisionGateDecision: LisdoManagedProviderGateDecision {
+        LisdoManagedProviderGate.decision(
+            snapshot: entitlementStore.effectiveSnapshot,
+            hasLisdoAccountSession: accountSessionService.currentLisdoBearerToken() != nil
+        )
     }
 
     private func managedRevisionUnavailableMessage() -> String {
-        let snapshot = entitlementStore.effectiveSnapshot
-        if !snapshot.isFeatureEnabled(.lisdoManagedDrafts) {
-            return "Lisdo revisions need Starter Trial or a monthly plan. Refresh Lisdo after purchase, or use BYOK providers on Free."
+        switch managedRevisionGateDecision {
+        case .requiresSignIn:
+            return "Lisdo revisions require a signed-in Lisdo account and an active plan. Open You > Plan to sign in or purchase."
+        case .planRequired:
+            return "This account plan does not include Lisdo revisions. Open You > Plan to purchase a Starter Trial or monthly plan."
+        case .quotaExhausted:
+            return "Lisdo quota is empty. Open You > Plan to upgrade or buy a top-up, or switch this capture to a BYOK provider."
+        case .allowed:
+            return "Lisdo revisions are temporarily unavailable."
         }
-
-        return "Lisdo quota is empty. Refresh Lisdo, switch this capture to a BYOK provider, or choose a plan with more included usage."
     }
 
     private func revisionSourceText(capture: CaptureItem?) -> String {
@@ -664,10 +726,12 @@ struct DraftReviewView: View {
             ?? sourceText.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? draft.title
 
-        let currentBlocks = blocks
+        let currentChecklist = checklistBlocks
             .map(\.content)
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: "\n- ")
+
+        let currentNote = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let currentReminders = suggestedReminders
             .map { reminder in
@@ -685,8 +749,10 @@ struct DraftReviewView: View {
         Title: \(title)
         Summary: \(summary)
         Due text: \(dueDateText)
-        Blocks:
-        - \(currentBlocks)
+        Checklist:
+        - \(currentChecklist)
+        Note:
+        \(currentNote)
         Suggested reminders:
         - \(currentReminders)
         """
@@ -719,6 +785,57 @@ struct DraftReviewView: View {
             dateMode = .none
             selectedDate = Date()
         }
+    }
+
+    private func loadBlockState(from draft: ProcessingDraft) {
+        let sortedBlocks = draft.blocks.sorted { $0.order < $1.order }
+        checklistBlocks = sortedBlocks.filter { $0.type == .checkbox }
+        noteText = Self.noteText(from: sortedBlocks)
+        showsNoteEditor = !noteText.isEmpty
+    }
+
+    private func sanitizedDraftBlocks() -> [DraftBlock] {
+        var sanitizedBlocks: [DraftBlock] = checklistBlocks.compactMap { block in
+            let trimmedContent = block.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedContent.isEmpty else { return nil }
+            return DraftBlock(
+                type: .checkbox,
+                content: trimmedContent,
+                checked: false,
+                order: 0
+            )
+        }
+
+        if let trimmedNote = noteText.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            sanitizedBlocks.append(
+                DraftBlock(
+                    type: .note,
+                    content: trimmedNote,
+                    checked: false,
+                    order: 0
+                )
+            )
+        }
+
+        return sanitizedBlocks.enumerated().map { index, block in
+            var orderedBlock = block
+            orderedBlock.order = index
+            return orderedBlock
+        }
+    }
+
+    private static func noteText(from blocks: [DraftBlock]) -> String {
+        blocks.compactMap { block in
+            let content = block.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty, block.type != .checkbox else { return nil }
+            if block.type == .bullet,
+               !content.hasPrefix("- "),
+               !content.hasPrefix("* ") {
+                return "- \(content)"
+            }
+            return content
+        }
+        .joined(separator: "\n")
     }
 
     private func sanitizedReminders() -> [DraftReminderSuggestion] {

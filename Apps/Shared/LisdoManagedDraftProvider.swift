@@ -13,7 +13,7 @@ extension LisdoManagedDraftProviderError: LocalizedError {
         case .invalidHTTPResponse:
             return "Lisdo did not receive a valid server response. Try again."
         case .httpStatus(402):
-            return "Lisdo quota is not available for this account. Refresh Lisdo or choose a plan with included usage."
+            return "Lisdo quota is not available for this account. Upgrade your plan, buy a top-up, or choose another provider."
         case .httpStatus(let statusCode):
             return "Lisdo server returned HTTP \(statusCode)."
         case .missingDraftJSON:

@@ -177,7 +177,9 @@ struct LisdoRootView: View {
         todo.status = .completed
         todo.updatedAt = Date()
         todo.blocks?.forEach { block in
-            block.checked = true
+            if block.type == .checkbox {
+                block.checked = true
+            }
         }
 
         do {

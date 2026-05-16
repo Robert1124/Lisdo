@@ -5,6 +5,18 @@ import StoreKit
 import SwiftData
 import SwiftUI
 
+private enum YouLisdoProviderGatePrimaryAction {
+    case openPlan
+}
+
+private struct YouLisdoProviderGateAlert: Identifiable {
+    let id: String
+    let title: String
+    let message: String
+    let primaryTitle: String
+    let primaryAction: YouLisdoProviderGatePrimaryAction
+}
+
 struct YouSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var iCloudSyncStatusMonitor: LisdoICloudSyncStatusMonitor
@@ -18,7 +30,7 @@ struct YouSettingsView: View {
     private let settingsSheetTopPadding: CGFloat = 26
     private let settingsSheetBottomPadding: CGFloat = 22
 
-    @StateObject private var storeKitService = LisdoStoreKitService()
+    @EnvironmentObject private var storeKitService: LisdoStoreKitService
 
     @State private var endpoint = ""
     @State private var model = ""
@@ -37,6 +49,7 @@ struct YouSettingsView: View {
     @State private var isRefreshingBackend = false
     @State private var pendingStoreProductAfterSignIn: LisdoStoreProductID?
     @State private var shouldRestorePurchasesAfterSignIn = false
+    @State private var lisdoProviderGateAlert: YouLisdoProviderGateAlert?
     @State private var activeSettingsSheet: YouSettingsSheet?
     @State private var notificationStatus = LisdoNotificationStatus(
         title: "Checking notifications",
@@ -66,6 +79,16 @@ struct YouSettingsView: View {
         .sheet(item: $activeSettingsSheet) { sheet in
             settingsSheet(for: sheet)
                 .presentationDragIndicator(.visible)
+        }
+        .alert(item: $lisdoProviderGateAlert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                primaryButton: .default(Text(alert.primaryTitle)) {
+                    handleLisdoProviderGatePrimaryAction(alert.primaryAction)
+                },
+                secondaryButton: .cancel(Text("Cancel"))
+            )
         }
         .onAppear {
             loadProviderSettings()
@@ -958,7 +981,9 @@ struct YouSettingsView: View {
             }
 
             if editingProviderMode == .lisdoManaged, !canUseLisdoManagedProvider {
-                providerModeStatus = "Lisdo settings saved. Choose a plan to use Lisdo."
+                let decision = lisdoManagedGateDecision
+                providerModeStatus = lisdoManagedUnavailableSummary(for: decision)
+                lisdoProviderGateAlert = lisdoManagedGateAlert(for: decision)
             } else {
                 saveProviderMode(editingProviderMode)
                 activeSettingsSheet = .providerSelection
@@ -1116,8 +1141,15 @@ struct YouSettingsView: View {
         return "Configured locally on this device."
     }
 
+    private var lisdoManagedGateDecision: LisdoManagedProviderGateDecision {
+        LisdoManagedProviderGate.decision(
+            snapshot: entitlementStore.effectiveSnapshot,
+            hasLisdoAccountSession: isLisdoAccountSignedIn
+        )
+    }
+
     private var canUseLisdoManagedProvider: Bool {
-        entitlementStore.effectiveSnapshot.consumingDraftUnits(1).isAllowed
+        lisdoManagedGateDecision == .allowed
     }
 
     private var planDisplaySnapshot: LisdoEntitlementSnapshot {
@@ -1129,13 +1161,7 @@ struct YouSettingsView: View {
     }
 
     private var lisdoManagedUnavailableSummary: String {
-        let snapshot = entitlementStore.effectiveSnapshot
-        if !snapshot.isFeatureEnabled(.lisdoManagedDrafts) {
-            return entitlementStore.hasServerQuota
-                ? "The backend account does not include Lisdo drafts. Refresh after purchase or choose a paid plan."
-                : "Choose a plan before using Lisdo as the draft provider."
-        }
-        return "Lisdo quota is empty. Refresh Lisdo or choose a plan with more included usage."
+        lisdoManagedUnavailableSummary(for: lisdoManagedGateDecision)
     }
 
     private var configuredProviderModes: [ProviderMode] {
@@ -1334,9 +1360,12 @@ struct YouSettingsView: View {
 
         do {
             let transaction = try await storeKitService.purchase(productID: productID)
-            let response = try await accountSessionService.verifyStoreKitTransaction(
-                storeKitService.verificationRequest(for: transaction)
-            )
+            guard let response = try await storeKitService.syncVerifiedTransactionWithBackend(
+                transaction,
+                accountSessionService: accountSessionService
+            ) else {
+                throw LisdoAccountSessionServiceError.missingBackendSessionToken
+            }
             entitlementStore.applyServerSnapshot(response.serverSnapshot(refreshedAt: Date()))
             await transaction.transaction.finish()
             applyPostPurchaseProviderSelection()
@@ -1372,10 +1401,14 @@ struct YouSettingsView: View {
 
             var restoredTier: LisdoPlanTier?
             for transaction in transactions {
-                let response = try await accountSessionService.verifyStoreKitTransaction(
-                    storeKitService.verificationRequest(for: transaction)
-                )
+                guard let response = try await storeKitService.syncVerifiedTransactionWithBackend(
+                    transaction,
+                    accountSessionService: accountSessionService
+                ) else {
+                    throw LisdoAccountSessionServiceError.missingBackendSessionToken
+                }
                 entitlementStore.applyServerSnapshot(response.serverSnapshot(refreshedAt: Date()))
+                await transaction.transaction.finish()
                 restoredTier = response.quota.entitlementSnapshot(entitlements: response.entitlements).tier
             }
             applyPostPurchaseProviderSelection()
@@ -1405,7 +1438,7 @@ struct YouSettingsView: View {
     }
 
     private func applyPostPurchaseProviderSelection() {
-        guard entitlementStore.effectiveSnapshot.isFeatureEnabled(.lisdoManagedDrafts) else { return }
+        guard canUseLisdoManagedProvider else { return }
         saveProviderMode(.lisdoManaged)
     }
 
@@ -1416,7 +1449,7 @@ struct YouSettingsView: View {
     private func providerSelectionDescription(for mode: ProviderMode, isLocked: Bool) -> String {
         if mode == .lisdoManaged {
             return isLocked
-                ? "Requires Starter Trial or a monthly plan."
+                ? lisdoManagedUnavailableSummary
                 : "Uses the Lisdo managed dev endpoint."
         }
         if DraftProviderFactory.metadata(for: mode).isNormallyMacLocal {
@@ -1426,6 +1459,63 @@ struct YouSettingsView: View {
             return "Configured with a local Keychain API key."
         }
         return "Configured locally on this device."
+    }
+
+    private func lisdoManagedUnavailableSummary(for decision: LisdoManagedProviderGateDecision) -> String {
+        switch decision {
+        case .requiresSignIn:
+            return "Sign in to Lisdo and choose a plan before using Lisdo provider."
+        case .planRequired:
+            return "This account plan does not include Lisdo provider."
+        case .quotaExhausted:
+            return "Lisdo usage is full. Upgrade or buy a top-up to continue."
+        case .allowed:
+            return ""
+        }
+    }
+
+    private func lisdoManagedGateAlert(for decision: LisdoManagedProviderGateDecision) -> YouLisdoProviderGateAlert {
+        switch decision {
+        case .requiresSignIn:
+            return YouLisdoProviderGateAlert(
+                id: "requires-sign-in",
+                title: "Sign in required",
+                message: "Lisdo provider requires a signed-in Lisdo account and an active plan.",
+                primaryTitle: "View Plan",
+                primaryAction: .openPlan
+            )
+        case .planRequired:
+            return YouLisdoProviderGateAlert(
+                id: "plan-required",
+                title: "Plan required",
+                message: "Your current plan does not include Lisdo provider. Purchase a Starter Trial or monthly plan to use Lisdo managed drafts.",
+                primaryTitle: "Go purchase",
+                primaryAction: .openPlan
+            )
+        case .quotaExhausted:
+            return YouLisdoProviderGateAlert(
+                id: "quota-exhausted",
+                title: "Lisdo usage is full",
+                message: "This account has no Lisdo usage left. Upgrade your plan or buy a top-up to continue with Lisdo provider.",
+                primaryTitle: "Upgrade or top up",
+                primaryAction: .openPlan
+            )
+        case .allowed:
+            return YouLisdoProviderGateAlert(
+                id: "allowed",
+                title: "Lisdo available",
+                message: "Lisdo provider is available for this account.",
+                primaryTitle: "OK",
+                primaryAction: .openPlan
+            )
+        }
+    }
+
+    private func handleLisdoProviderGatePrimaryAction(_ action: YouLisdoProviderGatePrimaryAction) {
+        switch action {
+        case .openPlan:
+            activeSettingsSheet = .plan
+        }
     }
 
     private func apiKeyLocalStorageCopy(for mode: ProviderMode) -> String {
@@ -1444,11 +1534,15 @@ struct YouSettingsView: View {
     }
 
     private func selectPlan(_ tier: LisdoPlanTier) {
-        _ = entitlementStore.updateSelectedTier(tier)
+        let snapshot = entitlementStore.updateSelectedTier(tier)
+        let gateDecision = LisdoManagedProviderGate.decision(
+            snapshot: snapshot,
+            hasLisdoAccountSession: isLisdoAccountSignedIn
+        )
 
         if tier == .free, providerMode == .lisdoManaged {
             saveProviderMode(.openAICompatibleBYOK)
-        } else if tier != .free {
+        } else if gateDecision == .allowed {
             saveProviderMode(.lisdoManaged)
         }
 
@@ -1456,9 +1550,10 @@ struct YouSettingsView: View {
     }
 
     private func selectProvider(_ mode: ProviderMode) {
-        guard mode != .lisdoManaged || canUseLisdoManagedProvider else {
-            providerModeStatus = "Choose a plan before using Lisdo."
-            activeSettingsSheet = .plan
+        if mode == .lisdoManaged, !canUseLisdoManagedProvider {
+            let decision = lisdoManagedGateDecision
+            providerModeStatus = lisdoManagedUnavailableSummary(for: decision)
+            lisdoProviderGateAlert = lisdoManagedGateAlert(for: decision)
             return
         }
 

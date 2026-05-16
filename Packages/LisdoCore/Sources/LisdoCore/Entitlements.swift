@@ -68,6 +68,32 @@ public struct LisdoQuotaConsumptionResult: Codable, Equatable, Sendable {
     }
 }
 
+public enum LisdoManagedProviderGateDecision: Equatable, Sendable {
+    case allowed
+    case requiresSignIn
+    case planRequired
+    case quotaExhausted
+}
+
+public enum LisdoManagedProviderGate {
+    public static func decision(
+        snapshot: LisdoEntitlementSnapshot,
+        hasLisdoAccountSession: Bool,
+        requestedDraftUnits: Int = 1
+    ) -> LisdoManagedProviderGateDecision {
+        guard hasLisdoAccountSession else {
+            return .requiresSignIn
+        }
+
+        guard snapshot.isFeatureEnabled(.lisdoManagedDrafts) else {
+            return .planRequired
+        }
+
+        let requestedUnits = max(1, requestedDraftUnits)
+        return snapshot.consumingDraftUnits(requestedUnits).isAllowed ? .allowed : .quotaExhausted
+    }
+}
+
 public struct LisdoEntitlementSnapshot: Codable, Equatable, Sendable {
     public var tier: LisdoPlanTier
     public var quotaBalance: LisdoQuotaBalance

@@ -116,4 +116,112 @@ final class EntitlementTests: XCTestCase {
         XCTAssertEqual(result.remainingBalance, startingBalance)
         XCTAssertEqual(result.insufficientUnits, 0)
     }
+
+    func testManagedProviderGateRequiresSignInBeforePlanOrQuotaChecks() {
+        let freeSnapshot = LisdoEntitlementSnapshot(tier: .free)
+        XCTAssertEqual(
+            LisdoManagedProviderGate.decision(
+                snapshot: freeSnapshot,
+                hasLisdoAccountSession: false
+            ),
+            .requiresSignIn
+        )
+
+        let exhaustedPaidSnapshot = LisdoEntitlementSnapshot(
+            tier: .monthlyBasic,
+            quotaBalance: LisdoQuotaBalance(monthlyNonRolloverUnits: 0, topUpRolloverUnits: 0)
+        )
+        XCTAssertEqual(
+            LisdoManagedProviderGate.decision(
+                snapshot: exhaustedPaidSnapshot,
+                hasLisdoAccountSession: false,
+                requestedDraftUnits: 2
+            ),
+            .requiresSignIn
+        )
+    }
+
+    func testManagedProviderGateRequiresPlanForSignedInFreeEntitlement() {
+        let snapshot = LisdoEntitlementSnapshot(
+            tier: .free,
+            quotaBalance: LisdoQuotaBalance(monthlyNonRolloverUnits: 10, topUpRolloverUnits: 10)
+        )
+
+        XCTAssertEqual(
+            LisdoManagedProviderGate.decision(
+                snapshot: snapshot,
+                hasLisdoAccountSession: true
+            ),
+            .planRequired
+        )
+    }
+
+    func testManagedProviderGateReportsQuotaExhaustedForEntitledPlansWithoutUsableUnits() {
+        let trialSnapshot = LisdoEntitlementSnapshot(
+            tier: .starterTrial,
+            quotaBalance: LisdoQuotaBalance(monthlyNonRolloverUnits: 0, topUpRolloverUnits: 10)
+        )
+        XCTAssertEqual(
+            LisdoManagedProviderGate.decision(
+                snapshot: trialSnapshot,
+                hasLisdoAccountSession: true
+            ),
+            .quotaExhausted
+        )
+
+        let paidSnapshot = LisdoEntitlementSnapshot(
+            tier: .monthlyPlus,
+            quotaBalance: LisdoQuotaBalance(monthlyNonRolloverUnits: 0, topUpRolloverUnits: 0)
+        )
+        XCTAssertEqual(
+            LisdoManagedProviderGate.decision(
+                snapshot: paidSnapshot,
+                hasLisdoAccountSession: true
+            ),
+            .quotaExhausted
+        )
+    }
+
+    func testManagedProviderGateAllowsEntitledPlansWithEnoughRequestedDraftUnits() {
+        let trialSnapshot = LisdoEntitlementSnapshot(
+            tier: .starterTrial,
+            quotaBalance: LisdoQuotaBalance(monthlyNonRolloverUnits: 1)
+        )
+        XCTAssertEqual(
+            LisdoManagedProviderGate.decision(
+                snapshot: trialSnapshot,
+                hasLisdoAccountSession: true
+            ),
+            .allowed
+        )
+
+        let paidSnapshot = LisdoEntitlementSnapshot(
+            tier: .monthlyBasic,
+            quotaBalance: LisdoQuotaBalance(monthlyNonRolloverUnits: 1, topUpRolloverUnits: 1)
+        )
+        XCTAssertEqual(
+            LisdoManagedProviderGate.decision(
+                snapshot: paidSnapshot,
+                hasLisdoAccountSession: true,
+                requestedDraftUnits: 2
+            ),
+            .allowed
+        )
+    }
+
+    func testManagedProviderGateComparesRequestedDraftUnitsAgainstUsableQuota() {
+        let snapshot = LisdoEntitlementSnapshot(
+            tier: .monthlyBasic,
+            quotaBalance: LisdoQuotaBalance(monthlyNonRolloverUnits: 1, topUpRolloverUnits: 0)
+        )
+
+        XCTAssertEqual(
+            LisdoManagedProviderGate.decision(
+                snapshot: snapshot,
+                hasLisdoAccountSession: true,
+                requestedDraftUnits: 2
+            ),
+            .quotaExhausted
+        )
+    }
 }

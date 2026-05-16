@@ -397,16 +397,17 @@ private extension Array where Element == Todo {
 
 private extension Array where Element == TodoBlock {
     func sortedForDailyExperience() -> [TodoBlock] {
-        sorted { lhs, rhs in
-            if lhs.order != rhs.order {
-                return lhs.order < rhs.order
-            }
+        filter { $0.type == .checkbox }
+            .sorted { lhs, rhs in
+                if lhs.order != rhs.order {
+                    return lhs.order < rhs.order
+                }
 
-            if lhs.content != rhs.content {
-                return lhs.content < rhs.content
-            }
+                if lhs.content != rhs.content {
+                    return lhs.content < rhs.content
+                }
 
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
     }
 }

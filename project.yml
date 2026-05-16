@@ -244,6 +244,7 @@ schemes:
         LisdoiOS: all
     run:
       config: Debug
+      storeKitConfiguration: Configs/Lisdo.storekit
   LisdoMac:
     build:
       targets:

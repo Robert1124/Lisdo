@@ -7,6 +7,7 @@ struct LisdoiOSApp: App {
     @StateObject private var modelContainerStore: LisdoiOSModelContainerStore
     @StateObject private var iCloudSyncStatusMonitor: LisdoICloudSyncStatusMonitor
     @StateObject private var entitlementStore: LisdoEntitlementStore
+    @StateObject private var storeKitService: LisdoStoreKitService
 
     init() {
         let entitlementStore = LisdoEntitlementStore()
@@ -20,6 +21,7 @@ struct LisdoiOSApp: App {
                 fallbackErrorDescription: result.fallbackErrorDescription
             )
         )
+        self._storeKitService = StateObject(wrappedValue: LisdoStoreKitService())
     }
 
     var body: some Scene {
@@ -29,6 +31,13 @@ struct LisdoiOSApp: App {
                 .modelContainer(modelContainerStore.result.container)
                 .environmentObject(iCloudSyncStatusMonitor)
                 .environmentObject(entitlementStore)
+                .environmentObject(storeKitService)
+                .onAppear {
+                    storeKitService.startTransactionUpdatesListener { response in
+                        entitlementStore.applyServerSnapshot(response.serverSnapshot(refreshedAt: Date()))
+                        iCloudSyncStatusMonitor.refresh()
+                    }
+                }
                 .onChange(of: entitlementStore.snapshot) { _, nextSnapshot in
                     modelContainerStore.reconcile(
                         entitlements: nextSnapshot,

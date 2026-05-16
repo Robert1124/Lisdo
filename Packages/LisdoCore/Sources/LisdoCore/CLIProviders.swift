@@ -174,6 +174,8 @@ public struct CLIDraftCommandStrategy: CLIDraftCommandBuilding {
         Use dueDateISO for deadlines and due-by times. Use scheduledDateISO for events, appointments, classes, meetings, or concrete start times.
         Use the source timestamp first when the source includes one; otherwise use the capture context supplied below. Preserve the original natural phrase in dueDateText. If the date is ambiguous, leave ISO fields null and ask a clarification question.
         Use suggestedReminders for preparatory or advance reminders under the main todo; do not put those as normal checklist blocks when they are separate reminders. Add reminderDateISO when the reminder time can be resolved to a concrete notification time. Examples: run a tech check the day before, update the computer the day before.
+        Use checkbox blocks only for actionable checklist items.
+        Use note blocks for optional contextual details that should render as a separate optional Note section sibling to the Checklist.
         Never return Markdown. AI output is a draft for user review, not a final todo.
 
         Source text:

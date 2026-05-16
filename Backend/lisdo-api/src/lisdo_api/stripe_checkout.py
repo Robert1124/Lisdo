@@ -12,6 +12,7 @@ from .quota import (
     apply_external_billing_grant,
     attach_stripe_customer,
     load_state,
+    revoke_external_monthly_entitlement,
     stripe_customer_id_for_account,
 )
 
@@ -297,6 +298,7 @@ def handle_webhook(config: DevConfig, *, payload: bytes, signature: str | None) 
     except Exception as exc:
         raise StripeWebhookError("Stripe webhook signature could not be verified.") from exc
 
+    event_id = _required_string(event, "id")
     event_type = _required_string(event, "type")
     data = _object_value(event, "data")
     obj = _object_value(data, "object")
@@ -307,6 +309,10 @@ def handle_webhook(config: DevConfig, *, payload: bytes, signature: str | None) 
         return _handle_checkout_completed(config, event_type, obj)
     if event_type in {"invoice.paid", "invoice.payment_succeeded"}:
         return _handle_invoice_paid(config, event_type, obj)
+    if event_type == "invoice.payment_failed":
+        return _handle_invoice_payment_failed(config, event_type, obj)
+    if event_type in {"customer.subscription.deleted", "customer.subscription.updated"}:
+        return _handle_subscription_lifecycle(config, event_type, event_id, obj)
 
     return {
         "status": "ignored",
@@ -388,6 +394,67 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
         "status": "processed",
         "eventType": event_type,
         "quota": state.snapshot(),
+    }
+
+
+def _handle_invoice_payment_failed(config: DevConfig, event_type: str, invoice: Any) -> dict[str, Any]:
+    customer_id = _required_string(invoice, "customer")
+    account_id = _metadata(invoice).get("accountId") or account_id_for_stripe_customer(config, customer_id)
+    if not account_id:
+        return {
+            "status": "ignored",
+            "eventType": event_type,
+            "reason": "unknown_customer",
+        }
+    state = load_state(config_for_account(config, account_id))
+    return {
+        "status": "processed",
+        "eventType": event_type,
+        "reason": "payment_failed",
+        "quota": state.snapshot(),
+    }
+
+
+def _handle_subscription_lifecycle(
+    config: DevConfig,
+    event_type: str,
+    event_id: str,
+    subscription: Any,
+) -> dict[str, Any]:
+    customer_id = _required_string(subscription, "customer")
+    account_id = _metadata(subscription).get("accountId") or account_id_for_stripe_customer(config, customer_id)
+    if not account_id:
+        return {
+            "status": "ignored",
+            "eventType": event_type,
+            "reason": "unknown_customer",
+        }
+    account_config = config_for_account(config, account_id)
+    status = _optional_string(subscription, "status")
+    subscription_id = _required_string(subscription, "id")
+    inactive_statuses = {"canceled", "unpaid", "incomplete_expired"}
+    should_revoke = event_type == "customer.subscription.deleted" or status in inactive_statuses
+    if should_revoke:
+        state = revoke_external_monthly_entitlement(
+            account_config,
+            source="stripe",
+            external_event_id=event_id,
+            reason="subscription_inactive",
+            customer_id=customer_id,
+            subscription_id=subscription_id,
+        )
+        return {
+            "status": "processed",
+            "eventType": event_type,
+            "reason": "subscription_inactive",
+            "quota": state.snapshot(),
+        }
+
+    return {
+        "status": "processed",
+        "eventType": event_type,
+        "reason": "subscription_active",
+        "quota": load_state(account_config).snapshot(),
     }
 
 

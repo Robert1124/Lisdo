@@ -149,6 +149,7 @@ struct QuickCaptureSheet: View {
 
     private let speechService = IOSSpeechTranscriptionService()
     private let textRecognitionService = VisionTextRecognitionService()
+    private let accountSessionService = LisdoAccountSessionService()
 
     init(categories: [Category]) {
         self.categories = categories
@@ -1276,22 +1277,36 @@ struct QuickCaptureSheet: View {
 
     private func canUseSelectedManagedProvider() -> Bool {
         guard providerMode == .lisdoManaged else { return true }
-        return entitlementStore.effectiveSnapshot.consumingDraftUnits(1).isAllowed
+        return managedProviderGateDecision == .allowed
+    }
+
+    private var managedProviderGateDecision: LisdoManagedProviderGateDecision {
+        LisdoManagedProviderGate.decision(
+            snapshot: entitlementStore.effectiveSnapshot,
+            hasLisdoAccountSession: accountSessionService.currentLisdoBearerToken() != nil
+        )
     }
 
     private func managedProviderUnavailableMessage() -> CaptureMessage {
-        let snapshot = entitlementStore.effectiveSnapshot
-        if !snapshot.isFeatureEnabled(.lisdoManagedDrafts) {
+        switch managedProviderGateDecision {
+        case .requiresSignIn:
+            return .failure(
+                "Sign in required",
+                "Lisdo provider requires a signed-in Lisdo account and an active plan. Open You > Plan to sign in or purchase."
+            )
+        case .planRequired:
             return .failure(
                 "Plan upgrade needed",
-                "Lisdo is available on Starter Trial and monthly plans. Refresh Lisdo after purchase, or use BYOK and Mac-local providers on Free."
+                "This account plan does not include Lisdo provider. Open You > Plan to purchase a Starter Trial or monthly plan."
             )
+        case .quotaExhausted:
+            return .failure(
+                "Lisdo quota empty",
+                "This account has no Lisdo usage left. Open You > Plan to upgrade or buy a top-up."
+            )
+        case .allowed:
+            return .failure("Lisdo unavailable", "Lisdo provider is temporarily unavailable.")
         }
-
-        return .failure(
-            "Lisdo quota empty",
-            "This account has no Lisdo usage left. Refresh Lisdo, switch to BYOK, or choose a plan with more included usage."
-        )
     }
 
     private var voiceProcessingMode: LisdoVoiceProcessingMode {

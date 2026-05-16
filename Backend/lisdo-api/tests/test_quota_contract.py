@@ -15,6 +15,7 @@ from conftest import (
     install_fake_app_store_server_library,
     invoke,
     unsigned_apple_identity_token,
+    unsigned_storekit_notification_jws,
     unsigned_storekit_transaction_jws,
 )
 
@@ -383,6 +384,166 @@ def test_dynamodb_storekit_server_jws_purchase_updates_plan_and_grants_quota(
     assert grants[0]["periodEnd"] == "2026-06-14T12:00:00Z"
     assert transactions[0]["transactionId"] == "jws-1000001"
     assert transactions[0]["environment"] == "Xcode"
+
+
+def test_dynamodb_storekit_server_notification_renews_existing_original_transaction(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    install_fake_app_store_server_library(monkeypatch)
+    dynamodb = _install_fake_boto3(monkeypatch)
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        storekit_verification_mode="server-jws",
+    )
+    _, auth_body = invoke(
+        handler,
+        "POST",
+        "/v1/auth/apple",
+        body={"identityToken": unsigned_apple_identity_token(subject="storekit-notification-user")},
+        token=None,
+    )
+    invoke(
+        handler,
+        "POST",
+        "/v1/storekit/transactions/verify",
+        token=auth_body["session"]["token"],
+        body={
+            "signedTransactionInfo": unsigned_storekit_transaction_jws(
+                transaction_id="initial-renewal-1",
+                original_transaction_id="original-renewal-1",
+                product_id="com.yiwenwu.Lisdo.monthlyBasic",
+                environment="Xcode",
+                expires_date_ms=1778673600000,
+            )
+        },
+    )
+
+    renewed_transaction = unsigned_storekit_transaction_jws(
+        transaction_id="renewal-2",
+        original_transaction_id="original-renewal-1",
+        product_id="com.yiwenwu.Lisdo.monthlyBasic",
+        environment="Xcode",
+        expires_date_ms=1781438400000,
+    )
+    notification = unsigned_storekit_notification_jws(
+        notification_type="DID_RENEW",
+        notification_uuid="storekit-renewal-notification-1",
+        signed_transaction_info=renewed_transaction,
+        environment="Xcode",
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/storekit/notifications",
+        token=None,
+        body={"signedPayload": notification},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert body["eventType"] == "DID_RENEW"
+    assert_quota_snapshot(body["quota"], plan_id="monthlyBasic", monthly_remaining=3000, topup_remaining=0)
+
+    table = dynamodb.Table("lisdo-test-quota")
+    transactions = _dynamodb_items(table, kind="storekitTransaction")
+    assert [transaction["transactionId"] for transaction in transactions] == [
+        "initial-renewal-1",
+        "renewal-2",
+    ]
+
+
+def test_dynamodb_storekit_server_notification_expires_subscription_but_keeps_topup_record(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    install_fake_app_store_server_library(monkeypatch)
+    dynamodb = _install_fake_boto3(monkeypatch)
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        storekit_verification_mode="server-jws",
+    )
+    _, auth_body = invoke(
+        handler,
+        "POST",
+        "/v1/auth/apple",
+        body={"identityToken": unsigned_apple_identity_token(subject="storekit-expired-notification-user")},
+        token=None,
+    )
+    token = auth_body["session"]["token"]
+    invoke(
+        handler,
+        "POST",
+        "/v1/storekit/transactions/verify",
+        token=token,
+        body={
+            "signedTransactionInfo": unsigned_storekit_transaction_jws(
+                transaction_id="initial-expire-1",
+                original_transaction_id="original-expire-1",
+                product_id="com.yiwenwu.Lisdo.monthlyBasic",
+                environment="Xcode",
+                expires_date_ms=1781438400000,
+            )
+        },
+    )
+    invoke(
+        handler,
+        "POST",
+        "/v1/storekit/transactions/verify",
+        token=token,
+        body={
+            "signedTransactionInfo": unsigned_storekit_transaction_jws(
+                transaction_id="topup-expire-1",
+                original_transaction_id="topup-expire-1",
+                product_id="com.yiwenwu.Lisdo.topUpUsage",
+                environment="Xcode",
+                expires_date_ms=None,
+            )
+        },
+    )
+
+    expired_transaction = unsigned_storekit_transaction_jws(
+        transaction_id="expired-2",
+        original_transaction_id="original-expire-1",
+        product_id="com.yiwenwu.Lisdo.monthlyBasic",
+        environment="Xcode",
+        expires_date_ms=1781438400000,
+    )
+    notification = unsigned_storekit_notification_jws(
+        notification_type="EXPIRED",
+        notification_uuid="storekit-expired-notification-1",
+        signed_transaction_info=expired_transaction,
+        environment="Xcode",
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/storekit/notifications",
+        token=None,
+        body={"signedPayload": notification},
+    )
+    draft_response, draft_body = invoke(handler, "POST", "/v1/drafts/generate", token=token, body=draft_generation_body())
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert body["eventType"] == "EXPIRED"
+    assert_quota_snapshot(body["quota"], plan_id="free", monthly_remaining=0, topup_remaining=10000)
+    assert draft_response["statusCode"] == 402
+    assert draft_body["error"]["code"] == "managed_drafts_unavailable"
+
+    table = dynamodb.Table("lisdo-test-quota")
+    monthly_grants = [
+        grant for grant in _dynamodb_items(table, kind="quotaGrant") if grant["bucket"] == "monthlyNonRollover"
+    ]
+    assert monthly_grants[0]["expiresAt"] == "2026-05-14T12:00:00Z"
 
 
 def test_dynamodb_storekit_server_jws_requires_signed_transaction_info(

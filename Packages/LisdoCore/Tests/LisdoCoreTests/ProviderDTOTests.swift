@@ -93,6 +93,36 @@ final class ProviderDTOTests: XCTestCase {
         XCTAssertTrue(prompt.contains("Preserve the original natural phrase in dueDateText"))
     }
 
+    func testProviderPromptsSeparateChecklistActionsFromContextualNotes() throws {
+        let input = TaskDraftInput(
+            captureItemId: UUID(uuidString: "77777777-7777-7777-7777-777777777777")!,
+            sourceText: "Revise the questionnaire. Context: Yan may want to review the intro first."
+        )
+        let categories = [
+            Category(id: "work", name: "Work", descriptionText: "Work tasks", formattingInstruction: "Use checklist", schemaPreset: .checklist)
+        ]
+        let options = TaskDraftProviderOptions(model: "test", maximumOutputTokens: 800)
+        let openAIRequest = OpenAICompatibleDraftRequestBuilder().makeRequest(
+            input: input,
+            categories: categories,
+            options: options
+        )
+        let cliCommand = CLIDraftCommandStrategy(provider: .codex()).makeCommand(
+            input: input,
+            categories: categories,
+            options: options
+        )
+        let openAIPrompt = openAIRequest.messages.map { $0.content.plainText }.joined(separator: "\n")
+        let prompts = [openAIPrompt, cliCommand.prompt]
+
+        for prompt in prompts {
+            XCTAssertTrue(prompt.contains("Return only strict JSON"))
+            XCTAssertTrue(prompt.contains("AI output is a draft for user review, not a final todo."))
+            XCTAssertTrue(prompt.contains("Use checkbox blocks only for actionable checklist items."))
+            XCTAssertTrue(prompt.contains("Use note blocks for optional contextual details that should render as a separate optional Note section sibling to the Checklist."))
+        }
+    }
+
     func testOpenAICompatibleRequestBuilderEncodesDirectImageAttachmentAsContentPart() throws {
         let input = TaskDraftInput(
             captureItemId: UUID(uuidString: "55555555-5555-5555-5555-555555555555")!,

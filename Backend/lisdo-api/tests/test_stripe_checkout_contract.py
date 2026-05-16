@@ -735,6 +735,275 @@ def test_stripe_subscription_invoice_webhook_accepts_current_invoice_shape(
     assert grants[0]["periodEnd"] == "2026-06-14T12:00:00Z"
 
 
+def test_stripe_one_time_checkout_webhook_grants_topup_for_active_monthly_account(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={
+            "monthlyBasic": "price_monthly_basic",
+            "topUpUsage": "price_topup",
+        },
+    )
+    _, auth_body = invoke(
+        handler,
+        "POST",
+        "/v1/auth/apple",
+        body={"identityToken": unsigned_apple_identity_token(subject="stripe-topup-webhook-user")},
+        token=None,
+    )
+    account_id = auth_body["account"]["id"]
+    invoice_event = {
+        "id": "evt_invoice_paid_topup_base",
+        "type": "invoice.paid",
+        "data": {
+            "object": {
+                "id": "in_topup_base",
+                "customer": "cus_topup",
+                "subscription": "sub_topup",
+                "metadata": {"accountId": account_id},
+                "lines": {
+                    "data": [
+                        {
+                            "price": {"id": "price_monthly_basic"},
+                            "period": {"end": 1781438400},
+                        }
+                    ]
+                },
+            }
+        },
+    }
+    topup_event = {
+        "id": "evt_checkout_topup_completed",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_topup_123",
+                "mode": "payment",
+                "payment_status": "paid",
+                "customer": "cus_topup",
+                "client_reference_id": account_id,
+                "metadata": {
+                    "accountId": account_id,
+                    "lisdoProductId": "topUpUsage",
+                },
+            }
+        },
+    }
+    _install_fake_stripe(monkeypatch, webhook_events=[invoice_event, topup_event])
+
+    invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=invoice_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=topup_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert_quota_snapshot(body["quota"], plan_id="monthlyBasic", monthly_remaining=3000, topup_remaining=10000)
+    table = dynamodb.Table("lisdo-test-quota")
+    grants = _dynamodb_items(table, kind="quotaGrant")
+    assert [grant["bucket"] for grant in grants] == ["monthlyNonRollover", "topUpRollover"]
+
+
+def test_stripe_invoice_payment_failed_is_processed_without_granting_quota(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": f"ACCOUNT#{account_id}",
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyBasic",
+            "userId": "test-user",
+            "stripeCustomerId": "cus_failed",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": "STRIPE_CUSTOMER#cus_failed",
+            "sk": "META",
+            "kind": "stripeCustomerIndex",
+            "accountId": account_id,
+            "createdAt": "2026-05-14T12:00:00Z",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    failed_event = {
+        "id": "evt_invoice_failed_1",
+        "type": "invoice.payment_failed",
+        "data": {
+            "object": {
+                "id": "in_failed_1",
+                "customer": "cus_failed",
+                "metadata": {},
+            }
+        },
+    }
+    _install_fake_stripe(monkeypatch, webhook_events=[failed_event])
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={"monthlyBasic": "price_monthly_basic"},
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=failed_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body == {
+        "status": "processed",
+        "eventType": "invoice.payment_failed",
+        "reason": "payment_failed",
+        "quota": {
+            "planId": "monthlyBasic",
+            "monthlyNonRolloverRemaining": 0,
+            "topUpRolloverRemaining": 0,
+            "monthlyNonRolloverConsumed": 0,
+            "topUpRolloverConsumed": 0,
+        },
+    }
+    assert _dynamodb_items(table, kind="quotaGrant") == []
+
+
+def test_stripe_subscription_deleted_reverts_monthly_plan_but_keeps_topup_record(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyBasic",
+            "userId": "test-user",
+            "stripeCustomerId": "cus_deleted",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#stripe#basic",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 3000,
+            "consumed": 250,
+            "source": "stripe",
+            "productId": "monthlyBasic",
+            "externalEventId": "basic",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-06-14T12:00:00Z",
+            "stripeCustomerId": "cus_deleted",
+            "stripeSubscriptionId": "sub_deleted",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#topUpRollover#stripe#topup",
+            "kind": "quotaGrant",
+            "bucket": "topUpRollover",
+            "quantity": 10000,
+            "consumed": 0,
+            "source": "stripe",
+            "productId": "topUpUsage",
+            "externalEventId": "topup",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "stripeCustomerId": "cus_deleted",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": "STRIPE_CUSTOMER#cus_deleted",
+            "sk": "META",
+            "kind": "stripeCustomerIndex",
+            "accountId": account_id,
+            "createdAt": "2026-05-14T12:00:00Z",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    deleted_event = {
+        "id": "evt_subscription_deleted_1",
+        "type": "customer.subscription.deleted",
+        "data": {
+            "object": {
+                "id": "sub_deleted",
+                "customer": "cus_deleted",
+                "status": "canceled",
+                "metadata": {
+                    "accountId": account_id,
+                    "lisdoProductId": "monthlyBasic",
+                },
+            }
+        },
+    }
+    _install_fake_stripe(monkeypatch, webhook_events=[deleted_event])
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={"monthlyBasic": "price_monthly_basic"},
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=deleted_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert body["eventType"] == "customer.subscription.deleted"
+    assert body["reason"] == "subscription_inactive"
+    assert_quota_snapshot(body["quota"], plan_id="free", monthly_remaining=0, topup_remaining=10000)
+    assert table.items[(pk, "META")]["planId"] == "free"
+    assert table.items[(pk, "GRANT#monthlyNonRollover#stripe#basic")]["expiresAt"] == "2026-05-14T12:00:00Z"
+
+
 def test_stripe_one_time_checkout_webhook_grants_starter_trial(load_lambda_handler, monkeypatch) -> None:
     dynamodb = _install_fake_boto3(monkeypatch)
     handler = load_lambda_handler(

@@ -13,14 +13,16 @@ from .entitlements import draft_model_for_plan, entitlements_for_plan
 from .quota import (
     MONTHLY_BUCKET,
     TOPUP_BUCKET,
+    account_id_for_storekit_original_transaction,
     apply_storekit_transaction,
     authorized_account_id_for_token,
     create_apple_account_session,
     load_account_profile,
     load_state,
+    revoke_external_monthly_entitlement,
     save_state,
 )
-from .storekit import StoreKitTransactionError, parse_verified_transaction
+from .storekit import StoreKitTransactionError, parse_server_notification, parse_verified_transaction
 from .stripe_checkout import (
     StripeCheckoutError,
     StripeConfigurationError,
@@ -50,6 +52,7 @@ GPT5_MANAGED_MAX_COMPLETION_TOKENS = 3000
 PUBLIC_ROUTES = {
     ("GET", "/v1/health"),
     ("POST", "/v1/auth/apple"),
+    ("POST", "/v1/storekit/notifications"),
     ("POST", "/v1/stripe/webhook"),
 }
 
@@ -192,6 +195,62 @@ def _dispatch(route: tuple[str, str], request: dict[str, Any], config: DevConfig
                 "status": "verified",
                 "mode": config.storekit_verification_mode,
                 "entitlements": entitlements_for_plan(state.plan_id),
+                "quota": state.snapshot(),
+            },
+        )
+
+    if route == ("POST", "/v1/storekit/notifications"):
+        body = _json_body(request)
+        try:
+            notification = parse_server_notification(
+                body,
+                verification_mode=config.storekit_verification_mode,
+                bundle_ids=config.storekit_bundle_ids,
+                app_apple_id=config.storekit_app_apple_id,
+                root_certificates_dir=config.storekit_root_certificates_dir,
+                enable_online_checks=config.storekit_enable_online_checks,
+                allow_xcode_environment=config.storekit_allow_xcode_environment,
+            )
+        except StoreKitTransactionError as exc:
+            raise InvalidRequest("invalid_storekit_notification", str(exc)) from exc
+
+        action = notification["action"]
+        transaction = notification.get("transaction")
+        if action == "ignored" or not isinstance(transaction, dict):
+            return _json_response(
+                200,
+                {
+                    "status": "ignored",
+                    "eventType": notification["notificationType"],
+                },
+            )
+        account_id = account_id_for_storekit_original_transaction(config, transaction["originalTransactionId"])
+        if account_id is None:
+            return _json_response(
+                200,
+                {
+                    "status": "ignored",
+                    "eventType": notification["notificationType"],
+                    "reason": "unknown_original_transaction",
+                },
+            )
+        account_config = config_for_account(config, account_id)
+        if action == "grant":
+            state = apply_storekit_transaction(account_config, transaction)
+        else:
+            state = revoke_external_monthly_entitlement(
+                account_config,
+                source="storekit",
+                external_event_id=notification["notificationUUID"],
+                reason=notification["notificationType"],
+                original_transaction_id=transaction["originalTransactionId"],
+            )
+
+        return _json_response(
+            200,
+            {
+                "status": "processed",
+                "eventType": notification["notificationType"],
                 "quota": state.snapshot(),
             },
         )

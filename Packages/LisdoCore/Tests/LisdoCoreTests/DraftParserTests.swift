@@ -40,6 +40,27 @@ final class DraftParserTests: XCTestCase {
         XCTAssertEqual(draft.generatedByProvider, "test-provider")
     }
 
+    func testParserDoesNotTrustProviderCheckedStateBeforeUserReview() throws {
+        let json = """
+        {
+          "recommendedCategoryId": "work",
+          "confidence": 0.82,
+          "title": "Prepare UCI Study Group questionnaire",
+          "summary": "Revise the questionnaire and keep the source note.",
+          "blocks": [
+            { "type": "checkbox", "content": "Revise the questionnaire", "checked": true },
+            { "type": "note", "content": "Source note for review", "checked": true }
+          ],
+          "needsClarification": false,
+          "questionsForUser": []
+        }
+        """
+
+        let draft = try TaskDraftParser.parse(json, captureItemId: UUID(), generatedByProvider: "test-provider")
+
+        XCTAssertEqual(draft.blocks.map(\.checked), [false, false])
+    }
+
     func testParsesCanonicalISODatesForDueAndScheduledDates() throws {
         let json = """
         {

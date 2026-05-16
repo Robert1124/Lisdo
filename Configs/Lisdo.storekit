@@ -1,0 +1,137 @@
+{
+  "identifier" : "7A0A2501",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "55B9E8D2",
+      "localizations" : [
+        {
+          "description" : "One-time starter trial access for local StoreKit testing.",
+          "displayName" : "Starter Trial",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.yiwenwu.Lisdo.starterTrial",
+      "referenceName" : "Starter Trial",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "96E6C2D5",
+      "localizations" : [
+        {
+          "description" : "Adds rollover Lisdo usage for local StoreKit testing.",
+          "displayName" : "Usage Top-Up",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.yiwenwu.Lisdo.topUpUsage",
+      "referenceName" : "Usage Top-Up",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "0B77B28A",
+      "localizations" : [
+        {
+          "description" : "Monthly Lisdo plans for local StoreKit testing.",
+          "displayName" : "Lisdo Monthly Plans",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "Lisdo Monthly Plans",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "C01218DE",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Basic monthly Lisdo plan for local StoreKit testing.",
+              "displayName" : "Monthly Basic",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.yiwenwu.Lisdo.monthlyBasic",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monthly Basic",
+          "subscriptionGroupID" : "0B77B28A",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "2B6BC3C2",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Plus monthly Lisdo plan for local StoreKit testing.",
+              "displayName" : "Monthly Plus",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.yiwenwu.Lisdo.monthlyPlus",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monthly Plus",
+          "subscriptionGroupID" : "0B77B28A",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "14.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "9280698C",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Max monthly Lisdo plan for local StoreKit testing.",
+              "displayName" : "Monthly Max",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.yiwenwu.Lisdo.monthlyMax",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monthly Max",
+          "subscriptionGroupID" : "0B77B28A",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

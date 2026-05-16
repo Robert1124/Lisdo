@@ -9,6 +9,8 @@ const copy = {
     "nav.github": "GitHub",
     "nav.sponsor": "赞助",
     "common.ok": "OK",
+    "common.cancel": "取消",
+    "common.confirm": "确认",
     "hero.title": "杂乱输入，先成草稿",
     "hero.subtitle": "Lisdo 是 iPhone 和 Mac 上的 AI task inbox。复制文字、导入截图、语音记录或从 Mac 菜单栏捕获内容，先生成草稿，再由你确认保存为分类待办。",
     "hero.primary": "看它如何工作",
@@ -125,7 +127,9 @@ const copy = {
     "plans.subscribe": "订阅",
     "plans.currentPlan": "当前套餐",
     "plans.managePlan": "管理套餐",
+    "plans.switchPlan": "Switch",
     "plans.buyTopup": "购买补充额度",
+    "plans.billingRouteNote": "新订阅和 top-up 会打开 Stripe Checkout。套餐切换会先在这里确认，再发送给 Stripe；付款方式和发票修改使用 Stripe Billing Portal。",
     "plans.checkoutReady": "Lisdo account session 可用后即可购买。",
     "plans.checkoutNeedsSession": "请先登录 Lisdo account。",
     "plans.checkoutOpening": "正在打开 Stripe Checkout...",
@@ -135,6 +139,10 @@ const copy = {
     "plans.changeUpgradeStarted": "套餐升级已提交。付款完成后额度会刷新。",
     "plans.changeDowngradeScheduled": "套餐降级已安排，会在下个账单周期生效。",
     "plans.portalOpening": "正在打开 Stripe Billing Portal...",
+    "plans.confirmUpgradeTitle": "确认升级套餐",
+    "plans.confirmUpgradeBody": "确认后，Lisdo 会向 Stripe 提交升级请求。Stripe 可能按当前账单周期计算差价并尝试付款；后端 webhook 确认后会刷新套餐和额度。",
+    "plans.confirmDowngradeTitle": "确认降级套餐",
+    "plans.confirmDowngradeBody": "确认后，Lisdo 会在 Stripe 安排降级。当前套餐会持续到本账单周期结束，新套餐会从下个账单周期自动开始。",
     "plans.signInUnavailable": "网页 Sign in with Apple 尚未配置。请从 Lisdo app 打开此页面。",
     "plans.signInFailed": "Sign in with Apple 未完成。请重试。",
     "plans.modalTitle": "无法继续",
@@ -269,6 +277,8 @@ const copy = {
     "nav.github": "GitHub",
     "nav.sponsor": "Sponsor",
     "common.ok": "OK",
+    "common.cancel": "Cancel",
+    "common.confirm": "Confirm",
     "hero.title": "Messy input, clear drafts",
     "hero.subtitle": "Lisdo is an AI task inbox for iPhone and Mac. Paste text, import screenshots, record voice, or capture from the Mac menu bar. AI drafts first, you approve before anything becomes a todo.",
     "hero.primary": "See how it works",
@@ -385,7 +395,9 @@ const copy = {
     "plans.subscribe": "Subscribe",
     "plans.currentPlan": "Current",
     "plans.managePlan": "Manage plan",
+    "plans.switchPlan": "Switch",
     "plans.buyTopup": "Buy top-up",
+    "plans.billingRouteNote": "New subscriptions and top-ups open Stripe Checkout. Plan switches are confirmed here and sent to Stripe; payment method and invoice changes use Stripe Billing Portal.",
     "plans.checkoutReady": "Ready when your Lisdo account session is available.",
     "plans.checkoutNeedsSession": "Log in to your Lisdo account first.",
     "plans.checkoutOpening": "Opening Stripe Checkout...",
@@ -395,6 +407,10 @@ const copy = {
     "plans.changeUpgradeStarted": "Plan upgrade started. Quota refreshes after payment completes.",
     "plans.changeDowngradeScheduled": "Plan downgrade scheduled for the next billing period.",
     "plans.portalOpening": "Opening Stripe Billing Portal...",
+    "plans.confirmUpgradeTitle": "Confirm plan upgrade",
+    "plans.confirmUpgradeBody": "After you confirm, Lisdo sends the upgrade request to Stripe. Stripe may invoice the prorated difference for the current billing period; plan and quota refresh after the backend webhook confirms payment.",
+    "plans.confirmDowngradeTitle": "Confirm plan downgrade",
+    "plans.confirmDowngradeBody": "After you confirm, Lisdo schedules the downgrade in Stripe. Your current plan stays active until this billing period ends, and the new plan starts automatically next billing period.",
     "plans.signInUnavailable": "Web Sign in with Apple is not configured yet. Open this page from the Lisdo app.",
     "plans.signInFailed": "Sign in with Apple did not complete. Try again.",
     "plans.modalTitle": "Unable to continue",
@@ -598,6 +614,9 @@ let accountState = {
   profile: null,
   quota: null
 };
+let accountLoadingDepth = 0;
+let accountLoadingMessageKey = "account.profileLoading";
+let checkoutModalConfirmAction = null;
 
 function resolveWebConfig() {
   const pageConfig = window.LISDO_WEB_CONFIG || {};
@@ -650,6 +669,7 @@ function applyLanguage(lang) {
   }
   updateAccountLinks();
   updateWebAccountUI();
+  setAccountLoading(accountLoadingDepth > 0, accountLoadingMessageKey);
   renderAccountCenter();
   renderReleases();
 }
@@ -767,19 +787,63 @@ function isModalCheckoutStatus(keyOrText) {
   ].includes(keyOrText);
 }
 
-function showCheckoutModal(message) {
+function setAccountLoading(isLoading, keyOrText = "account.profileLoading") {
+  const section = document.querySelector("[data-account-center]");
+  const overlay = document.querySelector("[data-account-loading]");
+  const message = document.querySelector("[data-account-loading-message]");
+  if (!section || !overlay) {
+    return;
+  }
+  accountLoadingMessageKey = keyOrText;
+  if (message) {
+    message.textContent = copy[currentLang][keyOrText] || keyOrText;
+  }
+  section.classList.toggle("is-loading", isLoading);
+  overlay.hidden = !isLoading;
+}
+
+async function withAccountLoading(keyOrText, operation) {
+  accountLoadingDepth += 1;
+  setAccountLoading(true, keyOrText);
+  try {
+    return await operation();
+  } finally {
+    accountLoadingDepth = Math.max(0, accountLoadingDepth - 1);
+    if (accountLoadingDepth === 0) {
+      setAccountLoading(false, keyOrText);
+    }
+  }
+}
+
+function showCheckoutModal(message, options = {}) {
   const modal = document.querySelector("[data-checkout-modal]");
   const title = document.querySelector("[data-checkout-modal-title]");
   const body = document.querySelector("[data-checkout-modal-message]");
   if (!modal || !title || !body) {
     return;
   }
-  title.textContent = copy[currentLang]["plans.modalTitle"];
+  const confirmButton = modal.querySelector("[data-checkout-modal-confirm]");
+  const cancelButton = modal.querySelector("[data-checkout-modal-cancel]");
+  const closeButton = modal.querySelector("[data-checkout-modal-close]");
+  checkoutModalConfirmAction = typeof options.confirmAction === "function" ? options.confirmAction : null;
+  title.textContent = copy[currentLang][options.titleKey] || options.title || copy[currentLang]["plans.modalTitle"];
   body.textContent = message;
+  if (confirmButton instanceof HTMLElement) {
+    confirmButton.hidden = !checkoutModalConfirmAction;
+    confirmButton.textContent = copy[currentLang][options.confirmTextKey || "common.confirm"];
+  }
+  if (cancelButton instanceof HTMLElement) {
+    cancelButton.hidden = !checkoutModalConfirmAction;
+    cancelButton.textContent = copy[currentLang][options.cancelTextKey || "common.cancel"];
+  }
+  if (closeButton instanceof HTMLElement) {
+    closeButton.hidden = Boolean(checkoutModalConfirmAction);
+  }
   modal.hidden = false;
   document.body.classList.add("modal-open");
-  const closeButton = modal.querySelector("[data-checkout-modal-close]");
-  if (closeButton instanceof HTMLElement) {
+  if (checkoutModalConfirmAction && confirmButton instanceof HTMLElement) {
+    confirmButton.focus();
+  } else if (closeButton instanceof HTMLElement) {
     closeButton.focus();
   }
 }
@@ -790,6 +854,7 @@ function closeCheckoutModal() {
     return;
   }
   modal.hidden = true;
+  checkoutModalConfirmAction = null;
   document.body.classList.remove("modal-open");
 }
 
@@ -803,6 +868,9 @@ function updateWebAccountUI() {
   });
   document.querySelectorAll("[data-billing-portal]").forEach((button) => {
     button.hidden = !signedIn;
+  });
+  document.querySelectorAll("[data-billing-route-note]").forEach((node) => {
+    node.hidden = !signedIn;
   });
 }
 
@@ -850,39 +918,43 @@ function secureRandomToken() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function lisdoApiPost(path, body) {
+async function lisdoApiPost(path, body, loadingKey = "account.profileLoading") {
   if (!webConfig.apiBaseUrl || !webSession.token) {
     throw new Error("missing-session");
   }
-  const response = await fetch(`${webConfig.apiBaseUrl}${path}`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${webSession.token}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body || {})
+  return await withAccountLoading(loadingKey, async () => {
+    const response = await fetch(`${webConfig.apiBaseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${webSession.token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body || {})
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((payload.error && payload.error.message) || `HTTP ${response.status}`);
+    }
+    return payload;
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error((payload.error && payload.error.message) || `HTTP ${response.status}`);
-  }
-  return payload;
 }
 
-async function lisdoApiGet(path) {
+async function lisdoApiGet(path, loadingKey = "account.profileLoading") {
   if (!webConfig.apiBaseUrl || !webSession.token) {
     throw new Error("missing-session");
   }
-  const response = await fetch(`${webConfig.apiBaseUrl}${path}`, {
-    headers: {
-      "Authorization": `Bearer ${webSession.token}`
+  return await withAccountLoading(loadingKey, async () => {
+    const response = await fetch(`${webConfig.apiBaseUrl}${path}`, {
+      headers: {
+        "Authorization": `Bearer ${webSession.token}`
+      }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((payload.error && payload.error.message) || `HTTP ${response.status}`);
     }
+    return payload;
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error((payload.error && payload.error.message) || `HTTP ${response.status}`);
-  }
-  return payload;
 }
 
 async function startCheckout(productId) {
@@ -896,7 +968,7 @@ async function startCheckout(productId) {
       setCheckoutStatus("plans.checkoutReady");
       return;
     }
-    await changeSubscription(productId);
+    confirmSubscriptionChange(productId, activePlan);
     return;
   }
   if (productId === "topUpUsage" && !hasActiveMonthlyQuota()) {
@@ -905,7 +977,7 @@ async function startCheckout(productId) {
   }
   setCheckoutStatus("plans.checkoutOpening");
   try {
-    const payload = await lisdoApiPost("/v1/stripe/checkout/session", { productId });
+    const payload = await lisdoApiPost("/v1/stripe/checkout/session", { productId }, "plans.checkoutOpening");
     if (payload.url) {
       window.location.assign(payload.url);
       return;
@@ -916,10 +988,20 @@ async function startCheckout(productId) {
   }
 }
 
+function confirmSubscriptionChange(productId, activePlan) {
+  const isUpgrade = monthlyPlanRank(productId) > monthlyPlanRank(activePlan);
+  const titleKey = isUpgrade ? "plans.confirmUpgradeTitle" : "plans.confirmDowngradeTitle";
+  const bodyKey = isUpgrade ? "plans.confirmUpgradeBody" : "plans.confirmDowngradeBody";
+  showCheckoutModal(copy[currentLang][bodyKey], {
+    titleKey,
+    confirmAction: () => changeSubscription(productId)
+  });
+}
+
 async function changeSubscription(productId) {
   setCheckoutStatus("plans.changeOpening");
   try {
-    const payload = await lisdoApiPost("/v1/stripe/subscription/change", { productId });
+    const payload = await lisdoApiPost("/v1/stripe/subscription/change", { productId }, "plans.changeOpening");
     if (payload.status === "downgrade_scheduled") {
       setCheckoutStatus("plans.changeDowngradeScheduled");
     } else {
@@ -939,7 +1021,7 @@ async function openBillingPortal() {
   }
   setCheckoutStatus("plans.portalOpening");
   try {
-    const payload = await lisdoApiPost("/v1/stripe/billing-portal/session", {});
+    const payload = await lisdoApiPost("/v1/stripe/billing-portal/session", {}, "plans.portalOpening");
     if (payload.url) {
       window.location.assign(payload.url);
       return;
@@ -1003,16 +1085,16 @@ async function signInWithAppleForWeb() {
 }
 
 async function authenticateWebAccountWithApple(identityToken, appleName, authorizationCode, nonce) {
-  const response = await fetch(`${webConfig.apiBaseUrl}/v1/auth/apple`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      identityToken,
-      authorizationCode,
-      nonce,
-      name: appleName
-    })
-  });
+  const response = await withAccountLoading("account.profileLoading", async () => fetch(`${webConfig.apiBaseUrl}/v1/auth/apple`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        identityToken,
+        authorizationCode,
+        nonce,
+        name: appleName
+      })
+    }));
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.session || !payload.session.token) {
     throw new Error("auth failed");
@@ -1153,7 +1235,7 @@ async function refreshAccountCenter() {
   }
   setCheckoutStatus("account.profileLoading");
   try {
-    const payload = await lisdoApiGet("/v1/account/profile");
+    const payload = await lisdoApiGet("/v1/account/profile", "account.profileLoading");
     accountState = {
       account: payload.account || null,
       profile: payload.profile || null,
@@ -1282,15 +1364,23 @@ function updatePlanSelection() {
       return;
     }
     const productId = button.dataset.checkoutProduct || "";
-    const isCurrentActivePlan = activeMonthlyQuota && productId === activePlan;
+    const isCurrentActivePlan = Boolean(activePlan && productId === activePlan);
     const isMonthlyChange = activeMonthlyQuota && isActiveMonthlyPlan(activePlan) && isActiveMonthlyPlan(productId);
     button.disabled = isCurrentActivePlan;
     button.textContent = isCurrentActivePlan
       ? copy[currentLang]["plans.currentPlan"]
       : isMonthlyChange
-        ? copy[currentLang]["plans.managePlan"]
+        ? copy[currentLang]["plans.switchPlan"]
         : copy[currentLang]["plans.subscribe"];
   });
+}
+
+function monthlyPlanRank(planId) {
+  return {
+    monthlyBasic: 1,
+    monthlyPlus: 2,
+    monthlyMax: 3
+  }[planId] || 0;
 }
 
 function emailName(email) {
@@ -1401,6 +1491,27 @@ if (billingPortalButton) {
 const checkoutModalCloseButton = document.querySelector("[data-checkout-modal-close]");
 if (checkoutModalCloseButton) {
   checkoutModalCloseButton.addEventListener("click", closeCheckoutModal);
+}
+
+const checkoutModalCancelButton = document.querySelector("[data-checkout-modal-cancel]");
+if (checkoutModalCancelButton) {
+  checkoutModalCancelButton.addEventListener("click", closeCheckoutModal);
+}
+
+const checkoutModalConfirmButton = document.querySelector("[data-checkout-modal-confirm]");
+if (checkoutModalConfirmButton) {
+  checkoutModalConfirmButton.addEventListener("click", async () => {
+    const action = checkoutModalConfirmAction;
+    closeCheckoutModal();
+    if (!action) {
+      return;
+    }
+    try {
+      await action();
+    } catch (error) {
+      setCheckoutStatus("plans.checkoutFailed");
+    }
+  });
 }
 
 const checkoutModal = document.querySelector("[data-checkout-modal]");

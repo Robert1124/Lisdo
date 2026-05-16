@@ -653,7 +653,7 @@ enum LisdoMacMVP2Processing {
             return "Lisdo Managed AI needs Starter Trial or a monthly plan. BYOK and Mac-only CLI providers remain available on Free."
         }
 
-        return "Managed usage is empty. Switch to BYOK or choose a plan with more included usage."
+        return "Managed usage is empty. Switch to BYOK, upgrade your plan, or buy a top-up."
     }
 
     private static func isQueueProcessable(_ capture: CaptureItem) -> Bool {

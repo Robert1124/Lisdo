@@ -19,6 +19,7 @@ struct TodoDetailSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     summarySection
                     checklistSection
+                    notesSection
                     remindersSection
                     actionSection
 
@@ -181,88 +182,167 @@ struct TodoDetailSheet: View {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
     private var checklistSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                LisdoSectionHeader(title: "Checklist", detail: "\(checkboxBlocks.filter(\.checked).count)/\(checkboxBlocks.count)")
-                if isEditing {
-                    Button {
-                        addChecklistItem()
-                    } label: {
-                        Label("Add", systemImage: "plus")
-                            .labelStyle(.titleAndIcon)
+        if !checkboxBlocks.isEmpty || isEditing {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    LisdoSectionHeader(title: "Checklist", detail: checklistDetail)
+                    if isEditing {
+                        Button {
+                            addChecklistItem()
+                        } label: {
+                            Label("Add", systemImage: "plus")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(LisdoTheme.ink1)
+                        .buttonStyle(.plain)
                     }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(LisdoTheme.ink1)
-                    .buttonStyle(.plain)
+                }
+
+                if checkboxBlocks.isEmpty {
+                    Text("No checklist items.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(LisdoTheme.ink3)
+                } else {
+                    ForEach(checkboxBlocks, id: \.id) { block in
+                        if isEditing {
+                            checklistEditorRow(block)
+                        } else {
+                            checklistDisplayRow(block)
+                        }
+                    }
                 }
             }
+            .lisdoCard(padding: 14)
+        }
+    }
 
-            if sortedBlocks.isEmpty {
-                Text("No checklist items.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(LisdoTheme.ink3)
-            } else {
-                ForEach(sortedBlocks, id: \.id) { block in
-                    if isEditing {
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Button {
-                                toggleBlock(block)
-                            } label: {
-                                TodoDetailCheckMark(isChecked: block.checked)
-                                    .frame(width: 20, height: 20)
-                                    .contentShape(Circle())
-                                    .alignmentGuide(.firstTextBaseline) { dimensions in
-                                        dimensions[VerticalAlignment.center] + 2
-                                    }
-                            }
-                            .buttonStyle(.plain)
-                            .alignmentGuide(.firstTextBaseline) { dimensions in
-                                dimensions[VerticalAlignment.center] + 2
-                            }
-                            .disabled(block.type != .checkbox)
-
-                            TextField("Checklist item", text: blockContentBinding(block), axis: .vertical)
-                                .font(.system(size: 14))
-                                .foregroundStyle(LisdoTheme.ink1)
-                                .textFieldStyle(.plain)
-                                .padding(9)
-                                .background(LisdoTheme.surface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-                            LisdoInlineDeleteButton(
-                                accessibilityLabel: "Delete checklist item",
-                                action: { deleteBlock(block) }
-                            )
-                            .alignmentGuide(.firstTextBaseline) { dimensions in
-                                dimensions[VerticalAlignment.center] + 2
-                            }
-                        }
-                    } else {
-                        Button {
-                            toggleBlock(block)
-                        } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                TodoDetailCheckMark(isChecked: block.checked)
-                                    .frame(width: 20, height: 20)
-                                    .alignmentGuide(.firstTextBaseline) { dimensions in
-                                        dimensions[VerticalAlignment.center] + 2
-                                    }
-
-                                Text(block.content)
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(block.checked ? LisdoTheme.ink3 : LisdoTheme.ink2)
-                                    .strikethrough(block.checked, color: LisdoTheme.ink4)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(block.type != .checkbox)
+    private func checklistEditorRow(_ block: TodoBlock) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Button {
+                toggleBlock(block)
+            } label: {
+                TodoDetailCheckMark(isChecked: block.checked)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Circle())
+                    .alignmentGuide(.firstTextBaseline) { dimensions in
+                        dimensions[VerticalAlignment.center] + 2
                     }
-                }
+            }
+            .buttonStyle(.plain)
+            .alignmentGuide(.firstTextBaseline) { dimensions in
+                dimensions[VerticalAlignment.center] + 2
+            }
+
+            TextField("Checklist item", text: blockContentBinding(block), axis: .vertical)
+                .font(.system(size: 14))
+                .foregroundStyle(LisdoTheme.ink1)
+                .textFieldStyle(.plain)
+                .padding(9)
+                .background(LisdoTheme.surface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            LisdoInlineDeleteButton(
+                accessibilityLabel: "Delete checklist item",
+                action: { deleteBlock(block) }
+            )
+            .alignmentGuide(.firstTextBaseline) { dimensions in
+                dimensions[VerticalAlignment.center] + 2
             }
         }
-        .lisdoCard(padding: 14)
+    }
+
+    private func checklistDisplayRow(_ block: TodoBlock) -> some View {
+        Button {
+            toggleBlock(block)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                TodoDetailCheckMark(isChecked: block.checked)
+                    .frame(width: 20, height: 20)
+                    .alignmentGuide(.firstTextBaseline) { dimensions in
+                        dimensions[VerticalAlignment.center] + 2
+                    }
+
+                Text(block.content)
+                    .font(.system(size: 14))
+                    .foregroundStyle(block.checked ? LisdoTheme.ink3 : LisdoTheme.ink2)
+                    .strikethrough(block.checked, color: LisdoTheme.ink4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var notesSection: some View {
+        if !noteBlocks.isEmpty || isEditing {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    LisdoSectionHeader(title: "Notes")
+                    if isEditing {
+                        Button {
+                            addNoteBlock()
+                        } label: {
+                            Label("Add", systemImage: "plus")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(LisdoTheme.ink1)
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if noteBlocks.isEmpty {
+                    Text("No notes.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(LisdoTheme.ink3)
+                } else {
+                    ForEach(noteBlocks, id: \.id) { block in
+                        if isEditing {
+                            noteEditorRow(block)
+                        } else {
+                            noteDisplayRow(block)
+                        }
+                    }
+                }
+            }
+            .lisdoCard(padding: 14)
+        }
+    }
+
+    private func noteEditorRow(_ block: TodoBlock) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            TodoDetailNoteGlyph(type: block.type)
+                .padding(.top, 10)
+
+            TextField("Note", text: blockContentBinding(block), axis: .vertical)
+                .font(.system(size: 14))
+                .foregroundStyle(LisdoTheme.ink1)
+                .textFieldStyle(.plain)
+                .padding(9)
+                .background(LisdoTheme.surface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            LisdoInlineDeleteButton(
+                accessibilityLabel: "Delete note",
+                action: { deleteBlock(block) }
+            )
+            .padding(.top, 3)
+        }
+    }
+
+    private func noteDisplayRow(_ block: TodoBlock) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            TodoDetailNoteGlyph(type: block.type)
+                .padding(.top, 2)
+
+            Text(block.content)
+                .font(.system(size: 14))
+                .foregroundStyle(LisdoTheme.ink2)
+                .lineSpacing(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     @ViewBuilder
@@ -505,6 +585,15 @@ struct TodoDetailSheet: View {
         sortedBlocks.filter { $0.type == .checkbox }
     }
 
+    private var noteBlocks: [TodoBlock] {
+        sortedBlocks.filter { $0.type == .note || $0.type == .bullet }
+    }
+
+    private var checklistDetail: String? {
+        guard !checkboxBlocks.isEmpty else { return nil }
+        return "\(checkboxBlocks.filter(\.checked).count)/\(checkboxBlocks.count)"
+    }
+
     private var sortedReminders: [TodoReminder] {
         (todo.reminders ?? []).sorted { lhs, rhs in
             if lhs.order != rhs.order { return lhs.order < rhs.order }
@@ -613,6 +702,23 @@ struct TodoDetailSheet: View {
             todoId: todo.id,
             todo: todo,
             type: .checkbox,
+            content: "",
+            checked: false,
+            order: nextOrder
+        )
+        modelContext.insert(block)
+        var blocks = todo.blocks ?? []
+        blocks.append(block)
+        todo.blocks = blocks
+        todo.updatedAt = Date()
+    }
+
+    private func addNoteBlock() {
+        let nextOrder = ((todo.blocks ?? []).map(\.order).max() ?? -1) + 1
+        let block = TodoBlock(
+            todoId: todo.id,
+            todo: todo,
+            type: .note,
             content: "",
             checked: false,
             order: nextOrder
@@ -736,6 +842,27 @@ private struct TodoDetailCheckMark: View {
                     .foregroundStyle(LisdoTheme.onAccent)
                     .frame(width: 18, height: 18)
                     .background(LisdoTheme.ink1, in: Circle())
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct TodoDetailNoteGlyph: View {
+    var type: TodoBlockType
+
+    var body: some View {
+        Group {
+            if type == .bullet {
+                Circle()
+                    .fill(LisdoTheme.ink4)
+                    .frame(width: 5, height: 5)
+                    .frame(width: 20, height: 20)
+            } else {
+                Image(systemName: "note.text")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(LisdoTheme.ink4)
+                    .frame(width: 20, height: 20)
             }
         }
         .accessibilityHidden(true)

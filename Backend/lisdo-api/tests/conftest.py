@@ -94,6 +94,32 @@ def unsigned_storekit_transaction_jws(
     )
 
 
+def unsigned_storekit_notification_jws(
+    *,
+    notification_type: str = "DID_RENEW",
+    notification_uuid: str = "notification-1",
+    signed_transaction_info: str | None = None,
+    bundle_id: str = "com.yiwenwu.Lisdo",
+    environment: str = "Xcode",
+) -> str:
+    payload: dict[str, Any] = {
+        "notificationType": notification_type,
+        "notificationUUID": notification_uuid,
+        "data": {
+            "bundleId": bundle_id,
+            "environment": environment,
+            "signedTransactionInfo": signed_transaction_info or unsigned_storekit_transaction_jws(environment=environment),
+        },
+    }
+    return ".".join(
+        [
+            _base64url_json({"alg": "none", "typ": "JWT"}),
+            _base64url_json(payload),
+            "",
+        ]
+    )
+
+
 def install_fake_app_store_server_library(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeEnvironment(enum.Enum):
         SANDBOX = "Sandbox"
@@ -122,6 +148,17 @@ def install_fake_app_store_server_library(monkeypatch: pytest.MonkeyPatch) -> No
             if payload.get("environment") != self.environment:
                 raise FakeVerificationException("environment mismatch")
             if payload.get("bundleId") != self.bundle_id:
+                raise FakeVerificationException("bundle mismatch")
+            return types.SimpleNamespace(**payload)
+
+        def verify_and_decode_notification(self, signed_payload: str) -> Any:
+            payload = _decode_unsigned_jws_payload(signed_payload)
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                raise FakeVerificationException("notification data missing")
+            if data.get("environment") != self.environment:
+                raise FakeVerificationException("environment mismatch")
+            if data.get("bundleId") != self.bundle_id:
                 raise FakeVerificationException("bundle mismatch")
             return types.SimpleNamespace(**payload)
 

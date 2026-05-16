@@ -19,7 +19,7 @@ extension LisdoBackendClientError: LocalizedError {
         case .httpStatus(401), .httpStatus(403):
             return "Lisdo could not authenticate this account. Sign in again or refresh Lisdo."
         case .httpStatus(402):
-            return "Lisdo quota is not available for this account. Refresh Lisdo or choose a plan with included usage."
+            return "Lisdo quota is not available for this account. Upgrade your plan, buy a top-up, or choose another provider."
         case .httpStatus(429):
             return "Lisdo is temporarily rate limited. Try again in a moment."
         case .httpStatus(let statusCode) where (500..<600).contains(statusCode):

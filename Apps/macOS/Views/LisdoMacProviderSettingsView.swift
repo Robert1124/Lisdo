@@ -4,6 +4,19 @@ import LisdoCore
 import SwiftData
 import SwiftUI
 
+private enum LisdoProviderGatePrimaryAction {
+    case viewPlan
+    case purchase
+}
+
+private struct LisdoProviderGateAlert: Identifiable {
+    let id: String
+    let title: String
+    let message: String
+    let primaryTitle: String
+    let primaryAction: LisdoProviderGatePrimaryAction
+}
+
 struct LisdoMacProviderSettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var sparkleUpdater: LisdoMacSparkleUpdater
@@ -28,7 +41,8 @@ struct LisdoMacProviderSettingsView: View {
     @State private var providerSelection: ProviderPickerSelection = .addMore
     @State private var suppressedProviderSelection: ProviderPickerSelection?
     @State private var providerConfigurationVisibility: ProviderConfigurationVisibility = .viewing
-    @State private var isShowingLisdoUpgradeAlert = false
+    @State private var lisdoProviderGateAlert: LisdoProviderGateAlert?
+    @State private var isShowingLisdoPurchaseConfirmation = false
     @State private var editingMode: ProviderMode = .openAICompatibleBYOK
     @State private var cliKind: CLIProviderKind = .codex
     @State private var cliExecutablePath = ""
@@ -66,14 +80,27 @@ struct LisdoMacProviderSettingsView: View {
         .onChange(of: syncedSettingsSnapshot) { _, _ in
             loadSyncedSelections(updateEditingMode: false)
         }
-        .alert("Upgrade to use Lisdo", isPresented: $isShowingLisdoUpgradeAlert) {
-            Button("Open Personal Center") {
-                openPersonalCenter()
+        .alert(item: $lisdoProviderGateAlert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                primaryButton: .default(Text(alert.primaryTitle)) {
+                    handleLisdoProviderGatePrimaryAction(alert.primaryAction)
+                },
+                secondaryButton: .cancel(Text("Cancel")) {
+                    restoreProviderPickerSelection()
+                }
+            )
+        }
+        .alert("Finished purchasing?", isPresented: $isShowingLisdoPurchaseConfirmation) {
+            Button("Check plan") {
+                Task { await confirmLisdoPurchaseAndMaybeSelectProvider() }
             }
-            Button("View Plan") { selectedSettingsTab = .plan }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {
+                restoreProviderPickerSelection()
+            }
         } message: {
-            Text("Lisdo requires Starter Trial or a monthly plan. Purchase or manage your plan in Personal Center, then refresh Lisdo on this Mac.")
+            Text("After checkout or plan changes finish in the browser, Lisdo will ask the server for the latest plan and quota.")
         }
     }
 
@@ -202,15 +229,17 @@ struct LisdoMacProviderSettingsView: View {
         switch providerSelection {
         case .provider(let mode):
             VStack(alignment: .leading, spacing: 10) {
-                Text(providerSelectionDescription(for: mode))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if mode != .lisdoManaged {
+                    Text(providerSelectionDescription(for: mode))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 if mode == .lisdoManaged {
                     lisdoQuotaPreview
                 }
 
-                if providerConfigurationVisibility == .viewing {
+                if providerConfigurationVisibility == .viewing, mode != .lisdoManaged {
                     HStack {
                         Button {
                             beginEditingProvider(mode)
@@ -219,14 +248,12 @@ struct LisdoMacProviderSettingsView: View {
                         }
                         .buttonStyle(.bordered)
 
-                        if mode != .lisdoManaged {
-                            Button(role: .destructive) {
-                                removeSelectedProvider(mode)
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                            .buttonStyle(.bordered)
+                        Button(role: .destructive) {
+                            removeSelectedProvider(mode)
+                        } label: {
+                            Label("Remove", systemImage: "trash")
                         }
+                        .buttonStyle(.bordered)
                     }
                 }
             }
@@ -252,7 +279,7 @@ struct LisdoMacProviderSettingsView: View {
         Section {
             if providerConfigurationVisibility == .adding {
                 Picker("Format", selection: $editingMode) {
-                    ForEach(DraftProviderFactory.supportedModes, id: \.self) { mode in
+                    ForEach(DraftProviderFactory.supportedModes.filter { $0 != .lisdoManaged }, id: \.self) { mode in
                         Text(DraftProviderFactory.metadata(for: mode).displayName).tag(mode)
                     }
                 }
@@ -357,14 +384,6 @@ struct LisdoMacProviderSettingsView: View {
                 .tint(LisdoMacTheme.ink1)
                 .accessibilityLabel("Quota remaining")
 
-            Button {
-                Task { await refreshLisdoBackendIfConfigured(silent: false) }
-            } label: {
-                Label("Refresh Lisdo", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.bordered)
-            .disabled(isRefreshingBackend)
-
             if !backendRefreshStatus.isEmpty {
                 Text(backendRefreshStatus)
                     .font(.caption)
@@ -376,36 +395,10 @@ struct LisdoMacProviderSettingsView: View {
     private var planSettingsTab: some View {
         Form {
             Section {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: accountSessionService.currentLisdoBearerToken() == nil ? "person.crop.circle.badge.plus" : "person.crop.circle.badge.checkmark")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(accountSessionService.currentLisdoBearerToken() == nil ? "Sign in to sync Lisdo plan" : "Lisdo account signed in")
-                            .font(.callout.weight(.semibold))
-                        Text(accountSessionService.currentLisdoBearerToken() == nil ? "Mac can refresh the plan and quota purchased on iPhone or assigned by the backend." : "This Mac uses the saved Lisdo backend session when refreshing quota.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        ViewThatFits(in: .horizontal) {
-                            HStack {
-                                lisdoAccountActionButtons
-                            }
-                            VStack(alignment: .leading, spacing: 8) {
-                                lisdoAccountActionButtons
-                            }
-                        }
-
-                        if !accountStatus.isEmpty {
-                            Text(accountStatus)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+                if hasLisdoAccountSession {
+                    signedInLisdoAccountCard
+                } else {
+                    signedOutLisdoAccountCard
                 }
             } header: {
                 Text("Lisdo account")
@@ -430,43 +423,86 @@ struct LisdoMacProviderSettingsView: View {
                     Text(entitlementStore.snapshot.isFeatureEnabled(.lisdoManagedDrafts) ? "Enabled" : "Upgrade required")
                 }
 
-                Text(LisdoEntitlementStore.iCloudPlanChangeReloadNote)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             } header: {
-                Text("Local dev plan")
+                Text("Plan")
             }
         }
         .lisdoSettingsFormSurface()
     }
 
     @ViewBuilder
-    private var lisdoAccountActionButtons: some View {
-        Button {
-            openPersonalCenter()
-        } label: {
-            Label("Manage plan", systemImage: "safari")
-        }
-        .buttonStyle(.borderedProminent)
+    private var signedOutLisdoAccountCard: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(width: 32)
 
-        SignInWithAppleButton(.signIn) { request in
-            request.requestedScopes = [.email]
-        } onCompletion: { result in
-            beginAppleSignInAuthentication(result)
-        }
-        .signInWithAppleButtonStyle(.black)
-        .frame(width: 220, height: 38)
-        .disabled(isAuthenticatingLisdoAccount)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Sign in to sync Lisdo plan")
+                    .font(.callout.weight(.semibold))
+                Text("Mac can use the Lisdo plan and quota returned by the backend after sign in.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-        Button {
-            Task { await refreshLisdoBackendIfConfigured(silent: false) }
-        } label: {
-            Label("Refresh Lisdo", systemImage: "arrow.clockwise")
+                SignInWithAppleButton(.signIn) { request in
+                    request.requestedScopes = [.email]
+                } onCompletion: { result in
+                    beginAppleSignInAuthentication(result)
+                }
+                .signInWithAppleButtonStyle(.black)
+                .frame(width: 260, height: 50)
+                .disabled(isAuthenticatingLisdoAccount)
+
+                if !accountStatus.isEmpty {
+                    Text(accountStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
-        .buttonStyle(.bordered)
-        .disabled(isRefreshingBackend)
     }
+
+    @ViewBuilder
+    private var signedInLisdoAccountCard: some View {
+        let summary = accountSessionService.currentAccountSummary()
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                Image(systemName: "person.crop.circle.fill.badge.checkmark")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(LisdoMacTheme.ink1)
+            }
+            .frame(width: 52, height: 52)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(summary?.displayLabel ?? "Lisdo account")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(LisdoMacTheme.ink1)
+                Text("Signed in on this Mac")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if !accountStatus.isEmpty {
+                    Text(accountStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.08), lineWidth: 1)
+        }
+    }
+
 
     private var hotKeySettingsTab: some View {
         Form {
@@ -586,16 +622,34 @@ struct LisdoMacProviderSettingsView: View {
         metadata.requiresAPIKey ? "API key" : "Optional API key"
     }
 
+    private var hasLisdoAccountSession: Bool {
+        accountSessionService.currentLisdoBearerToken() != nil
+    }
+
+    private var lisdoProviderGateDecision: LisdoManagedProviderGateDecision {
+        LisdoManagedProviderGate.decision(
+            snapshot: entitlementStore.effectiveSnapshot,
+            hasLisdoAccountSession: hasLisdoAccountSession
+        )
+    }
+
     private var canUseLisdoProvider: Bool {
-        entitlementStore.effectiveSnapshot.isFeatureEnabled(.lisdoManagedDrafts)
+        lisdoProviderGateDecision == .allowed
     }
 
     private var quotaRemainingLabel: String {
-        if entitlementStore.serverQuota != nil {
+        switch lisdoProviderGateDecision {
+        case .requiresSignIn:
+            return "Sign in required"
+        case .planRequired:
+            return "Plan required"
+        case .quotaExhausted:
+            return "Quota empty"
+        case .allowed where entitlementStore.serverQuota != nil:
             return "Included usage"
+        case .allowed:
+            return "Local preview"
         }
-
-        return canUseLisdoProvider ? "Local preview" : "Not active"
     }
 
     private var mockQuotaRemainingFraction: Double {
@@ -704,7 +758,7 @@ struct LisdoMacProviderSettingsView: View {
 
     private func applySyncedSettings(_ settings: LisdoSyncedSettings, updateEditingMode: Bool) {
         if settings.selectedProviderMode == .lisdoManaged && !canUseLisdoProvider {
-            fallbackFromUnavailableLisdo(statusMessage: "Lisdo requires Starter Trial or a monthly plan. Choose another provider or add one.")
+            fallbackFromUnavailableLisdo(statusMessage: lisdoProviderUnavailableStatus(for: lisdoProviderGateDecision))
             return
         }
 
@@ -735,8 +789,8 @@ struct LisdoMacProviderSettingsView: View {
     private func selectProvider(_ selection: ProviderPickerSelection) {
         switch selection {
         case .provider(let mode):
-            guard mode != .lisdoManaged || canUseLisdoProvider else {
-                promptForLisdoUpgrade()
+            if mode == .lisdoManaged, !canUseLisdoProvider {
+                promptForLisdoProviderGate(lisdoProviderGateDecision)
                 return
             }
 
@@ -801,16 +855,95 @@ struct LisdoMacProviderSettingsView: View {
         return configuredProviderModes.contains(providerMode) ? .provider(providerMode) : .addMore
     }
 
-    private func promptForLisdoUpgrade() {
-        providerStatus = "Open Personal Center to purchase or manage a Lisdo plan, then refresh Lisdo."
+    private func promptForLisdoProviderGate(_ decision: LisdoManagedProviderGateDecision) {
+        providerStatus = lisdoProviderUnavailableStatus(for: decision)
         providerConfigurationVisibility = .viewing
         restoreProviderPickerSelection()
-        isShowingLisdoUpgradeAlert = true
+        lisdoProviderGateAlert = lisdoProviderGateAlert(for: decision)
+    }
+
+    private func lisdoProviderGateAlert(for decision: LisdoManagedProviderGateDecision) -> LisdoProviderGateAlert {
+        switch decision {
+        case .requiresSignIn:
+            return LisdoProviderGateAlert(
+                id: "requires-sign-in",
+                title: "Sign in required",
+                message: "Lisdo provider requires a signed-in Lisdo account and an active plan.",
+                primaryTitle: "View Plan",
+                primaryAction: .viewPlan
+            )
+        case .planRequired:
+            return LisdoProviderGateAlert(
+                id: "plan-required",
+                title: "Plan required",
+                message: "Your current plan does not include Lisdo provider. Purchase a Starter Trial or monthly plan to use Lisdo managed drafts.",
+                primaryTitle: "Go purchase",
+                primaryAction: .purchase
+            )
+        case .quotaExhausted:
+            return LisdoProviderGateAlert(
+                id: "quota-exhausted",
+                title: "Lisdo usage is full",
+                message: "This account has no Lisdo usage left. Upgrade your plan or buy a top-up to continue with Lisdo provider.",
+                primaryTitle: "Upgrade or top up",
+                primaryAction: .purchase
+            )
+        case .allowed:
+            return LisdoProviderGateAlert(
+                id: "allowed",
+                title: "Lisdo available",
+                message: "Lisdo provider is available for this account.",
+                primaryTitle: "OK",
+                primaryAction: .viewPlan
+            )
+        }
+    }
+
+    private func lisdoProviderUnavailableStatus(for decision: LisdoManagedProviderGateDecision) -> String {
+        switch decision {
+        case .requiresSignIn:
+            return "Sign in to Lisdo and choose a plan before using Lisdo provider."
+        case .planRequired:
+            return "This account plan does not include Lisdo provider."
+        case .quotaExhausted:
+            return "Lisdo usage is full. Upgrade or buy a top-up to continue."
+        case .allowed:
+            return ""
+        }
+    }
+
+    private func handleLisdoProviderGatePrimaryAction(_ action: LisdoProviderGatePrimaryAction) {
+        switch action {
+        case .viewPlan:
+            selectedSettingsTab = .plan
+        case .purchase:
+            openPersonalCenter()
+            isShowingLisdoPurchaseConfirmation = true
+        }
+    }
+
+    @MainActor
+    private func confirmLisdoPurchaseAndMaybeSelectProvider() async {
+        accountStatus = "Checking Lisdo plan..."
+        _ = await refreshLisdoBackendIfConfigured(silent: false)
+
+        if canUseLisdoProvider {
+            providerConfigurationVisibility = .viewing
+            if updateSelectedProviderMode(.lisdoManaged) {
+                providerStatus = "Lisdo selected for this plan."
+                accountStatus = "Plan and quota are active on this Mac."
+            }
+        } else {
+            let decision = lisdoProviderGateDecision
+            restoreProviderPickerSelection()
+            providerStatus = lisdoProviderUnavailableStatus(for: decision)
+            accountStatus = providerStatus
+        }
     }
 
     private func openPersonalCenter() {
         NSWorkspace.shared.open(personalCenterURL)
-        accountStatus = "Opened Lisdo Personal Center in your browser. Sign in there, then refresh Lisdo here."
+        accountStatus = "Opened Lisdo Personal Center in your browser."
         providerStatus = "Opened Personal Center for Lisdo plan management."
     }
 
@@ -890,15 +1023,16 @@ struct LisdoMacProviderSettingsView: View {
     }
 
     @MainActor
-    private func refreshLisdoBackendIfConfigured(silent: Bool) async {
-        guard !isRefreshingBackend else { return }
+    @discardableResult
+    private func refreshLisdoBackendIfConfigured(silent: Bool) async -> Bool {
+        guard !isRefreshingBackend else { return false }
 
         let settings = factory.loadSettings(for: .lisdoManaged)
         guard let endpointURL = settings.endpointURL else {
             if !silent {
                 backendRefreshStatus = "Add a Lisdo endpoint before refreshing."
             }
-            return
+            return false
         }
 
         let token = (settings.bearerToken ?? "dev-token").lisdoTrimmed
@@ -906,7 +1040,7 @@ struct LisdoMacProviderSettingsView: View {
             if !silent {
                 backendRefreshStatus = "Add a Lisdo bearer token before refreshing."
             }
-            return
+            return false
         }
 
         isRefreshingBackend = true
@@ -915,10 +1049,12 @@ struct LisdoMacProviderSettingsView: View {
         do {
             _ = try await entitlementStore.refreshFromBackend(baseURL: endpointURL, bearerToken: token)
             backendRefreshStatus = ""
+            return true
         } catch {
             if !silent {
                 backendRefreshStatus = "Lisdo refresh failed: \(error.localizedDescription)"
             }
+            return false
         }
     }
 
@@ -962,8 +1098,8 @@ struct LisdoMacProviderSettingsView: View {
     @discardableResult
     private func save() -> Bool {
         guard editingMode != .lisdoManaged || canUseLisdoProvider else {
-            status = "Choose a plan before using Lisdo."
-            promptForLisdoUpgrade()
+            status = lisdoProviderUnavailableStatus(for: lisdoProviderGateDecision)
+            promptForLisdoProviderGate(lisdoProviderGateDecision)
             return false
         }
 
@@ -1082,14 +1218,18 @@ struct LisdoMacProviderSettingsView: View {
 
     private func selectPlan(_ tier: LisdoPlanTier) {
         let nextSnapshot = entitlementStore.updateSelectedTier(tier)
+        let nextDecision = LisdoManagedProviderGate.decision(
+            snapshot: nextSnapshot,
+            hasLisdoAccountSession: hasLisdoAccountSession
+        )
 
-        if nextSnapshot.isFeatureEnabled(.lisdoManagedDrafts) {
+        if nextDecision == .allowed {
             providerConfigurationVisibility = .viewing
             if updateSelectedProviderMode(.lisdoManaged) {
                 providerStatus = "Lisdo selected for this plan."
             }
         } else if providerMode == .lisdoManaged {
-            fallbackFromUnavailableLisdo(statusMessage: "Free uses BYOK or Mac-local providers. Add a provider to keep organizing drafts.")
+            fallbackFromUnavailableLisdo(statusMessage: lisdoProviderUnavailableStatus(for: nextDecision))
         }
     }
 
@@ -1137,9 +1277,7 @@ struct LisdoMacProviderSettingsView: View {
 
     private func providerSelectionDescription(for mode: ProviderMode) -> String {
         if mode == .lisdoManaged {
-            return canUseLisdoProvider
-                ? "Lisdo is available on the selected plan. Drafts still open for review."
-                : "Lisdo requires Starter Trial or a monthly plan."
+            return lisdoProviderUnavailableStatus(for: lisdoProviderGateDecision)
         }
 
         let modeMetadata = DraftProviderFactory.metadata(for: mode)

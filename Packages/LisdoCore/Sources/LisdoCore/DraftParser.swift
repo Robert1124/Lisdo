@@ -74,7 +74,7 @@ public enum TaskDraftParser {
             return DraftBlock(
                 type: type,
                 content: content,
-                checked: rawBlock.checked ?? false,
+                checked: false,
                 order: index
             )
         }

@@ -159,7 +159,7 @@ enum LisdoWidgetDataStore {
             throw LisdoWidgetIntentError.todoUnavailable
         }
         guard let blockID = UUID(uuidString: blockIDString),
-              let block = todo.blocks?.first(where: { $0.id == blockID }) else {
+              let block = todo.blocks?.first(where: { $0.id == blockID && $0.type == .checkbox }) else {
             throw LisdoWidgetIntentError.blockUnavailable
         }
 
@@ -185,7 +185,9 @@ enum LisdoWidgetDataStore {
         todo.status = .completed
         todo.updatedAt = Date()
         todo.blocks?.forEach { block in
-            block.checked = true
+            if block.type == .checkbox {
+                block.checked = true
+            }
         }
         try context.save()
 

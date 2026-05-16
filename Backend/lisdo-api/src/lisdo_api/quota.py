@@ -336,7 +336,30 @@ def apply_storekit_transaction(config: DevConfig, transaction: dict[str, Any]) -
         },
         ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
     )
+
+    table.put_item(
+        Item={
+            "pk": _storekit_original_transaction_pk(transaction["originalTransactionId"]),
+            "sk": "META",
+            "kind": "storekitOriginalTransactionIndex",
+            "accountId": config.account_id,
+            "originalTransactionId": transaction["originalTransactionId"],
+            "createdAt": config.now,
+            "updatedAt": config.now,
+        }
+    )
     return load_state(config)
+
+
+def account_id_for_storekit_original_transaction(config: DevConfig, original_transaction_id: str) -> str | None:
+    if not _uses_dynamodb(config):
+        return None
+    table = _dynamodb_table(config)
+    item = table.get_item(Key={"pk": _storekit_original_transaction_pk(original_transaction_id), "sk": "META"}).get("Item")
+    if not isinstance(item, dict) or item.get("kind") != "storekitOriginalTransactionIndex":
+        return None
+    account_id = item.get("accountId")
+    return account_id if isinstance(account_id, str) and account_id else None
 
 
 def stripe_customer_id_for_account(config: DevConfig) -> str | None:
@@ -486,6 +509,67 @@ def apply_external_billing_grant(
     return load_state(config)
 
 
+def revoke_external_monthly_entitlement(
+    config: DevConfig,
+    *,
+    source: str,
+    external_event_id: str,
+    reason: str,
+    customer_id: str | None = None,
+    subscription_id: str | None = None,
+    original_transaction_id: str | None = None,
+) -> QuotaState:
+    if not _uses_dynamodb(config):
+        return load_state(config)
+
+    table = _dynamodb_table(config)
+    pk = _account_pk(config.account_id)
+    event_sk = f"{source.upper()}#{external_event_id}"
+    if isinstance(table.get_item(Key={"pk": pk, "sk": event_sk}).get("Item"), dict):
+        return load_state(config)
+
+    current_items = _query_account_items(table, pk)
+    account_item = next((item for item in current_items if item.get("kind") == "account" and item.get("sk") == "META"), None)
+    updated_account = dict(account_item or {})
+    if customer_id:
+        updated_account["stripeCustomerId"] = customer_id
+    _put_account_plan(table, pk, config, updated_account, "free")
+
+    for grant in current_items:
+        if not _monthly_grant_matches_revoke(
+            grant,
+            source=source,
+            now=config.now,
+            subscription_id=subscription_id,
+            original_transaction_id=original_transaction_id,
+        ):
+            continue
+        updated_grant = dict(grant)
+        updated_grant["expiresAt"] = config.now
+        updated_grant["revokedAt"] = config.now
+        updated_grant["revokeReason"] = reason
+        table.put_item(Item=updated_grant)
+
+    event_item = {
+        "pk": pk,
+        "sk": event_sk,
+        "kind": f"{source}BillingEvent",
+        "source": source,
+        "externalEventId": external_event_id,
+        "eventType": "monthlyEntitlementRevoked",
+        "reason": reason,
+        "createdAt": config.now,
+    }
+    if customer_id:
+        event_item["stripeCustomerId"] = customer_id
+    if subscription_id:
+        event_item["stripeSubscriptionId"] = subscription_id
+    if original_transaction_id:
+        event_item["originalTransactionId"] = original_transaction_id
+    table.put_item(Item=event_item, ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)")
+    return load_state(config)
+
+
 def _uses_dynamodb(config: DevConfig) -> bool:
     return config.storage == "dynamodb"
 
@@ -563,6 +647,7 @@ def _storekit_grant_item(
         "source": "storekit",
         "productId": transaction["productId"],
         "transactionId": transaction["transactionId"],
+        "originalTransactionId": transaction["originalTransactionId"],
         "createdAt": config.now,
     }
     expiration_date = transaction.get("expirationDate")
@@ -807,6 +892,29 @@ def _dynamodb_grant_is_active(item: dict[str, Any], now: str) -> bool:
     return True
 
 
+def _monthly_grant_matches_revoke(
+    item: dict[str, Any],
+    *,
+    source: str,
+    now: str,
+    subscription_id: str | None,
+    original_transaction_id: str | None,
+) -> bool:
+    if item.get("kind") != "quotaGrant":
+        return False
+    if item.get("bucket") != MONTHLY_BUCKET:
+        return False
+    if item.get("source") != source:
+        return False
+    if not _dynamodb_grant_is_active(item, now):
+        return False
+    if subscription_id is not None and item.get("stripeSubscriptionId") != subscription_id:
+        return False
+    if original_transaction_id is not None and item.get("originalTransactionId") != original_transaction_id:
+        return False
+    return True
+
+
 def _account_pk(account_id: str) -> str:
     normalized = account_id.strip().lower() or "dev-account"
     return f"ACCOUNT#{normalized}"
@@ -814,6 +922,10 @@ def _account_pk(account_id: str) -> str:
 
 def _stripe_customer_pk(customer_id: str) -> str:
     return f"STRIPE_CUSTOMER#{customer_id.strip()}"
+
+
+def _storekit_original_transaction_pk(original_transaction_id: str) -> str:
+    return f"STOREKIT_ORIGINAL#{original_transaction_id.strip()}"
 
 
 def _same_quota_scope(data: dict[str, Any], state: QuotaState) -> bool:

@@ -521,7 +521,9 @@ struct InboxView: View {
         todo.status = .completed
         todo.updatedAt = Date()
         todo.blocks?.forEach { block in
-            block.checked = true
+            if block.type == .checkbox {
+                block.checked = true
+            }
         }
 
         guard saveTodoChanges() else { return }
@@ -783,9 +785,12 @@ struct DraftCardView: View {
                         .foregroundStyle(LisdoTheme.ink3)
                 }
 
-                if !draft.blocks.isEmpty {
+                let checkboxBlocks = draft.blocks
+                    .sorted { $0.order < $1.order }
+                    .filter { $0.type == .checkbox }
+                if !checkboxBlocks.isEmpty {
                     VStack(alignment: .leading, spacing: 7) {
-                        ForEach(draft.blocks.sorted { $0.order < $1.order }.prefix(4), id: \.self) { block in
+                        ForEach(checkboxBlocks.prefix(4), id: \.self) { block in
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 Circle()
                                     .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
@@ -798,11 +803,50 @@ struct DraftCardView: View {
                         }
                     }
                 }
+
+                let noteBlocks = draft.blocks
+                    .sorted { $0.order < $1.order }
+                    .filter { $0.type == .note || $0.type == .bullet }
+                if !noteBlocks.isEmpty {
+                    DraftNotePreviewList(blocks: Array(noteBlocks.prefix(2)))
+                }
             }
             .padding(14)
             .lisdoDashedDraft()
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct DraftNotePreviewList: View {
+    var blocks: [DraftBlock]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(blocks, id: \.self) { block in
+                HStack(alignment: .top, spacing: 8) {
+                    if block.type == .bullet {
+                        BulletGlyph()
+                            .padding(.top, 1)
+                    } else {
+                        NoteGlyph()
+                            .padding(.top, 1)
+                    }
+
+                    Text(block.content)
+                        .font(.system(size: 13))
+                        .foregroundStyle(LisdoTheme.ink2)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(10)
+        .background(LisdoTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(LisdoTheme.divider.opacity(0.72), lineWidth: 1)
+        }
     }
 }
 
@@ -952,9 +996,14 @@ struct TodoCardView: View {
                 Spacer(minLength: 0)
             }
 
-            let blocks = todo.blocks?.sortedForInboxDisplay() ?? []
-            if !blocks.isEmpty {
-                TodoBlockList(blocks: blocks, onToggleBlock: onToggleBlock)
+            let checklistBlocks = todo.blocks?.sortedForInboxChecklistDisplay() ?? []
+            if !checklistBlocks.isEmpty {
+                TodoBlockList(blocks: checklistBlocks, onToggleBlock: onToggleBlock)
+            }
+
+            let noteBlocks = todo.blocks?.sortedForInboxNoteDisplay() ?? []
+            if !noteBlocks.isEmpty {
+                TodoNoteBlockList(blocks: noteBlocks)
             }
 
             let reminders = todo.reminders?.sortedForInboxReminders() ?? []
@@ -1122,6 +1171,38 @@ private struct TodoBlockList: View {
         VStack(alignment: .leading, spacing: 7) {
             ForEach(blocks, id: \.id) { block in
                 TodoBlockRow(block: block, onToggle: onToggleBlock)
+            }
+        }
+        .padding(10)
+        .background(LisdoTheme.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(LisdoTheme.divider.opacity(0.75), lineWidth: 1)
+        }
+    }
+}
+
+private struct TodoNoteBlockList: View {
+    var blocks: [TodoBlock]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(blocks, id: \.id) { block in
+                HStack(alignment: .top, spacing: 8) {
+                    if block.type == .bullet {
+                        BulletGlyph()
+                            .padding(.top, 1)
+                    } else {
+                        NoteGlyph()
+                            .padding(.top, 1)
+                    }
+
+                    Text(block.content)
+                        .font(.system(size: 13))
+                        .foregroundStyle(LisdoTheme.ink2)
+                        .lineSpacing(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
         .padding(10)
@@ -1448,8 +1529,12 @@ private extension Todo {
 }
 
 private extension Array where Element == TodoBlock {
-    func sortedForInboxDisplay() -> [TodoBlock] {
-        sortedForInboxBlocks()
+    func sortedForInboxChecklistDisplay() -> [TodoBlock] {
+        sortedForInboxBlocks().filter { $0.type == .checkbox }
+    }
+
+    func sortedForInboxNoteDisplay() -> [TodoBlock] {
+        sortedForInboxBlocks().filter { $0.type == .note || $0.type == .bullet }
     }
 
     func sortedForInboxTaskControls() -> [TodoBlock] {

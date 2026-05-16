@@ -121,26 +121,27 @@ final class DailyExperienceStateTests: XCTestCase {
         XCTAssertFalse(snapshot.isComplete)
     }
 
-    func testActiveTaskWithAllStepsCheckedReportsCompleteProgressWithoutCreatingTodo() throws {
+    func testActiveTaskProgressUsesOnlyCheckboxBlocksWithoutCreatingTodo() throws {
         let active = makeTodo(
             title: "Finish report",
             status: .inProgress,
             blocks: [
                 block("Draft", type: .checkbox, checked: true, order: 0),
-                block("Review", type: .bullet, checked: true, order: 1),
-                block("Send", type: .note, checked: true, order: 2)
+                block("Review context", type: .bullet, checked: true, order: 1),
+                block("Ask Yan before sending", type: .note, checked: true, order: 2),
+                block("Send", type: .checkbox, checked: false, order: 3)
             ]
         )
 
         let snapshot = try XCTUnwrap(DailyExperienceState.liveActivitySnapshot(from: [active]))
 
         XCTAssertEqual(snapshot.todoId, active.id)
-        XCTAssertNil(snapshot.currentStep)
+        XCTAssertEqual(snapshot.currentStep?.content, "Send")
         XCTAssertNil(snapshot.nextStep)
-        XCTAssertEqual(snapshot.progressLabel, "All 3 steps complete")
-        XCTAssertEqual(snapshot.completedStepCount, 3)
-        XCTAssertEqual(snapshot.totalStepCount, 3)
-        XCTAssertTrue(snapshot.isComplete)
+        XCTAssertEqual(snapshot.progressLabel, "Step 2 of 2")
+        XCTAssertEqual(snapshot.completedStepCount, 1)
+        XCTAssertEqual(snapshot.totalStepCount, 2)
+        XCTAssertFalse(snapshot.isComplete)
     }
 
     func testDailyExperienceHelpersAreDraftFirstByOnlyAcceptingTodos() {

@@ -32,8 +32,15 @@ public struct LisdoVerifiedStoreKitTransaction {
 @MainActor
 public final class LisdoStoreKitService: ObservableObject {
     @Published public private(set) var products: [String: Product] = [:]
+    @Published public private(set) var transactionUpdateSyncStatus = ""
+
+    private var transactionUpdatesTask: Task<Void, Never>?
 
     public init() {}
+
+    deinit {
+        transactionUpdatesTask?.cancel()
+    }
 
     @discardableResult
     public func loadProducts() async throws -> [Product] {
@@ -80,6 +87,43 @@ public final class LisdoStoreKitService: ObservableObject {
         return transactions
     }
 
+    public func startTransactionUpdatesListener(
+        accountSessionService: LisdoAccountSessionService = LisdoAccountSessionService(),
+        onServerVerified: @escaping @MainActor @Sendable (LisdoStoreKitTransactionVerificationResponse) -> Void = { _ in }
+    ) {
+        guard transactionUpdatesTask == nil else { return }
+
+        transactionUpdatesTask = Task { [weak self] in
+            for await result in Transaction.updates {
+                guard !Task.isCancelled else { return }
+                await self?.syncTransactionUpdate(
+                    result,
+                    accountSessionService: accountSessionService,
+                    onServerVerified: onServerVerified
+                )
+            }
+        }
+    }
+
+    public func stopTransactionUpdatesListener() {
+        transactionUpdatesTask?.cancel()
+        transactionUpdatesTask = nil
+    }
+
+    @discardableResult
+    public func syncVerifiedTransactionWithBackend(
+        _ verifiedTransaction: LisdoVerifiedStoreKitTransaction,
+        accountSessionService: LisdoAccountSessionService = LisdoAccountSessionService()
+    ) async throws -> LisdoStoreKitTransactionVerificationResponse? {
+        guard accountSessionService.currentLisdoBearerToken() != nil else {
+            return nil
+        }
+
+        return try await accountSessionService.verifyStoreKitTransaction(
+            verificationRequest(for: verifiedTransaction)
+        )
+    }
+
     public func verificationRequest(for verifiedTransaction: LisdoVerifiedStoreKitTransaction) -> LisdoStoreKitTransactionVerificationRequest {
         let transaction = verifiedTransaction.transaction
         return LisdoStoreKitTransactionVerificationRequest(
@@ -92,6 +136,31 @@ public final class LisdoStoreKitService: ObservableObject {
             purchaseDate: iso8601String(from: transaction.purchaseDate),
             expirationDate: transaction.expirationDate.map(iso8601String(from:))
         )
+    }
+
+    private func syncTransactionUpdate(
+        _ result: VerificationResult<Transaction>,
+        accountSessionService: LisdoAccountSessionService,
+        onServerVerified: @escaping @MainActor @Sendable (LisdoStoreKitTransactionVerificationResponse) -> Void
+    ) async {
+        do {
+            let verifiedTransaction = try verifiedTransaction(from: result)
+            guard let response = try await syncVerifiedTransactionWithBackend(
+                verifiedTransaction,
+                accountSessionService: accountSessionService
+            ) else {
+                transactionUpdateSyncStatus = "StoreKit transaction is waiting for Lisdo sign-in before sync."
+                return
+            }
+
+            onServerVerified(response)
+            await verifiedTransaction.transaction.finish()
+            transactionUpdateSyncStatus = "StoreKit transaction synced."
+        } catch LisdoStoreKitServiceError.unverifiedTransaction {
+            transactionUpdateSyncStatus = "StoreKit delivered an unverified transaction update."
+        } catch {
+            transactionUpdateSyncStatus = "StoreKit transaction sync failed: \(error.localizedDescription)"
+        }
     }
 
     private func verifiedTransaction(from result: VerificationResult<Transaction>) throws -> LisdoVerifiedStoreKitTransaction {
