@@ -5,16 +5,30 @@ import StoreKit
 import SwiftData
 import SwiftUI
 
-private enum YouLisdoProviderGatePrimaryAction {
+private enum YouSettingsAlertPrimaryAction {
     case openPlan
 }
 
-private struct YouLisdoProviderGateAlert: Identifiable {
+private struct YouSettingsAlert: Identifiable {
     let id: String
     let title: String
     let message: String
-    let primaryTitle: String
-    let primaryAction: YouLisdoProviderGatePrimaryAction
+    let primaryTitle: String?
+    let primaryAction: YouSettingsAlertPrimaryAction?
+
+    init(
+        id: String,
+        title: String,
+        message: String,
+        primaryTitle: String? = nil,
+        primaryAction: YouSettingsAlertPrimaryAction? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.message = message
+        self.primaryTitle = primaryTitle
+        self.primaryAction = primaryAction
+    }
 }
 
 struct YouSettingsView: View {
@@ -49,7 +63,7 @@ struct YouSettingsView: View {
     @State private var isRefreshingBackend = false
     @State private var pendingStoreProductAfterSignIn: LisdoStoreProductID?
     @State private var shouldRestorePurchasesAfterSignIn = false
-    @State private var lisdoProviderGateAlert: YouLisdoProviderGateAlert?
+    @State private var settingsAlert: YouSettingsAlert?
     @State private var activeSettingsSheet: YouSettingsSheet?
     @State private var notificationStatus = LisdoNotificationStatus(
         title: "Checking notifications",
@@ -80,15 +94,23 @@ struct YouSettingsView: View {
             settingsSheet(for: sheet)
                 .presentationDragIndicator(.visible)
         }
-        .alert(item: $lisdoProviderGateAlert) { alert in
-            Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
-                primaryButton: .default(Text(alert.primaryTitle)) {
-                    handleLisdoProviderGatePrimaryAction(alert.primaryAction)
-                },
-                secondaryButton: .cancel(Text("Cancel"))
-            )
+        .alert(item: $settingsAlert) { alert in
+            if let primaryTitle = alert.primaryTitle, let primaryAction = alert.primaryAction {
+                Alert(
+                    title: Text(alert.title),
+                    message: Text(alert.message),
+                    primaryButton: .default(Text(primaryTitle)) {
+                        handleSettingsAlertPrimaryAction(primaryAction)
+                    },
+                    secondaryButton: .cancel(Text("Cancel"))
+                )
+            } else {
+                Alert(
+                    title: Text(alert.title),
+                    message: Text(alert.message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
         }
         .onAppear {
             loadProviderSettings()
@@ -983,7 +1005,7 @@ struct YouSettingsView: View {
             if editingProviderMode == .lisdoManaged, !canUseLisdoManagedProvider {
                 let decision = lisdoManagedGateDecision
                 providerModeStatus = lisdoManagedUnavailableSummary(for: decision)
-                lisdoProviderGateAlert = lisdoManagedGateAlert(for: decision)
+                settingsAlert = lisdoManagedGateAlert(for: decision)
             } else {
                 saveProviderMode(editingProviderMode)
                 activeSettingsSheet = .providerSelection
@@ -1160,6 +1182,13 @@ struct YouSettingsView: View {
         entitlementStore.hasServerQuota ? "Server" : "Local dev"
     }
 
+    private var isStripeManagedMonthlyPlan: Bool {
+        guard entitlementStore.serverQuota?.billingSource == "stripe" else {
+            return false
+        }
+        return [.monthlyBasic, .monthlyPlus, .monthlyMax].contains(planDisplaySnapshot.tier)
+    }
+
     private var lisdoManagedUnavailableSummary: String {
         lisdoManagedUnavailableSummary(for: lisdoManagedGateDecision)
     }
@@ -1332,6 +1361,10 @@ struct YouSettingsView: View {
     @MainActor
     private func selectOrPurchasePlan(_ tier: LisdoPlanTier) async {
         guard tier != .free else {
+            if isStripeManagedMonthlyPlan {
+                presentStripeManagedSubscriptionAlert()
+                return
+            }
             if entitlementStore.hasServerQuota {
                 purchaseStatus = "Downgrades are managed from your App Store subscription settings."
             } else {
@@ -1348,6 +1381,10 @@ struct YouSettingsView: View {
 
     @MainActor
     private func purchaseStoreProduct(_ productID: LisdoStoreProductID) async {
+        if shouldBlockStoreKitPurchase(for: productID) {
+            presentStripeManagedSubscriptionAlert()
+            return
+        }
         guard accountSessionService.currentLisdoBearerToken() != nil else {
             presentAccountSignInSheet(for: productID)
             return
@@ -1437,6 +1474,20 @@ struct YouSettingsView: View {
         activeSettingsSheet = .accountSignIn
     }
 
+    private func shouldBlockStoreKitPurchase(for productID: LisdoStoreProductID) -> Bool {
+        isStripeManagedMonthlyPlan && !productID.isTopUp
+    }
+
+    @MainActor
+    private func presentStripeManagedSubscriptionAlert() {
+        purchaseStatus = ""
+        settingsAlert = YouSettingsAlert(
+            id: "stripe-managed-subscription",
+            title: "Subscription managed elsewhere",
+            message: "You can't make changes to your subscription inside the app, because you purchased this subscription on another platform."
+        )
+    }
+
     private func applyPostPurchaseProviderSelection() {
         guard canUseLisdoManagedProvider else { return }
         saveProviderMode(.lisdoManaged)
@@ -1474,10 +1525,10 @@ struct YouSettingsView: View {
         }
     }
 
-    private func lisdoManagedGateAlert(for decision: LisdoManagedProviderGateDecision) -> YouLisdoProviderGateAlert {
+    private func lisdoManagedGateAlert(for decision: LisdoManagedProviderGateDecision) -> YouSettingsAlert {
         switch decision {
         case .requiresSignIn:
-            return YouLisdoProviderGateAlert(
+            return YouSettingsAlert(
                 id: "requires-sign-in",
                 title: "Sign in required",
                 message: "Lisdo provider requires a signed-in Lisdo account and an active plan.",
@@ -1485,7 +1536,7 @@ struct YouSettingsView: View {
                 primaryAction: .openPlan
             )
         case .planRequired:
-            return YouLisdoProviderGateAlert(
+            return YouSettingsAlert(
                 id: "plan-required",
                 title: "Plan required",
                 message: "Your current plan does not include Lisdo provider. Purchase a Starter Trial or monthly plan to use Lisdo managed drafts.",
@@ -1493,7 +1544,7 @@ struct YouSettingsView: View {
                 primaryAction: .openPlan
             )
         case .quotaExhausted:
-            return YouLisdoProviderGateAlert(
+            return YouSettingsAlert(
                 id: "quota-exhausted",
                 title: "Lisdo usage is full",
                 message: "This account has no Lisdo usage left. Upgrade your plan or buy a top-up to continue with Lisdo provider.",
@@ -1501,17 +1552,15 @@ struct YouSettingsView: View {
                 primaryAction: .openPlan
             )
         case .allowed:
-            return YouLisdoProviderGateAlert(
+            return YouSettingsAlert(
                 id: "allowed",
                 title: "Lisdo available",
-                message: "Lisdo provider is available for this account.",
-                primaryTitle: "OK",
-                primaryAction: .openPlan
+                message: "Lisdo provider is available for this account."
             )
         }
     }
 
-    private func handleLisdoProviderGatePrimaryAction(_ action: YouLisdoProviderGatePrimaryAction) {
+    private func handleSettingsAlertPrimaryAction(_ action: YouSettingsAlertPrimaryAction) {
         switch action {
         case .openPlan:
             activeSettingsSheet = .plan
@@ -1553,7 +1602,7 @@ struct YouSettingsView: View {
         if mode == .lisdoManaged, !canUseLisdoManagedProvider {
             let decision = lisdoManagedGateDecision
             providerModeStatus = lisdoManagedUnavailableSummary(for: decision)
-            lisdoProviderGateAlert = lisdoManagedGateAlert(for: decision)
+            settingsAlert = lisdoManagedGateAlert(for: decision)
             return
         }
 

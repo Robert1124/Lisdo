@@ -296,19 +296,22 @@ public struct LisdoBackendQuota: Codable, Equatable, Sendable {
     public var topUpRolloverRemaining: Int
     public var monthlyNonRolloverConsumed: Int
     public var topUpRolloverConsumed: Int
+    public var billingSource: String?
 
     public init(
         planId: String,
         monthlyNonRolloverRemaining: Int,
         topUpRolloverRemaining: Int,
         monthlyNonRolloverConsumed: Int,
-        topUpRolloverConsumed: Int
+        topUpRolloverConsumed: Int,
+        billingSource: String? = nil
     ) {
         self.planId = planId
         self.monthlyNonRolloverRemaining = max(0, monthlyNonRolloverRemaining)
         self.topUpRolloverRemaining = max(0, topUpRolloverRemaining)
         self.monthlyNonRolloverConsumed = max(0, monthlyNonRolloverConsumed)
         self.topUpRolloverConsumed = max(0, topUpRolloverConsumed)
+        self.billingSource = Self.normalizedBillingSource(billingSource)
     }
 
     public init(from decoder: Decoder) throws {
@@ -319,7 +322,8 @@ public struct LisdoBackendQuota: Codable, Equatable, Sendable {
             monthlyNonRolloverRemaining: (try? container.decodeFlexibleInt(forKey: .monthlyNonRolloverRemaining)) ?? 0,
             topUpRolloverRemaining: (try? container.decodeFlexibleInt(forKey: .topUpRolloverRemaining)) ?? 0,
             monthlyNonRolloverConsumed: (try? container.decodeFlexibleInt(forKey: .monthlyNonRolloverConsumed)) ?? 0,
-            topUpRolloverConsumed: (try? container.decodeFlexibleInt(forKey: .topUpRolloverConsumed)) ?? 0
+            topUpRolloverConsumed: (try? container.decodeFlexibleInt(forKey: .topUpRolloverConsumed)) ?? 0,
+            billingSource: try? container.decode(String.self, forKey: .billingSource)
         )
     }
 
@@ -409,6 +413,16 @@ public struct LisdoBackendQuota: Codable, Equatable, Sendable {
             return .starterTrial
         }
         return .free
+    }
+
+    private static func normalizedBillingSource(_ value: String?) -> String? {
+        let normalized = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let normalized, !normalized.isEmpty else {
+            return nil
+        }
+        return normalized
     }
 }
 
