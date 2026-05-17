@@ -965,6 +965,124 @@ def test_stripe_subscription_invoice_webhook_accepts_current_invoice_shape(
     assert grants[0]["periodEnd"] == "2026-06-14T12:00:00Z"
 
 
+def test_stripe_subscription_update_invoice_prefers_positive_configured_recurring_line(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyBasic",
+            "userId": "test-user",
+            "stripeCustomerId": "cus_proration",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#stripe#basic",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 3000,
+            "consumed": 750,
+            "source": "stripe",
+            "productId": "monthlyBasic",
+            "externalEventId": "basic",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-06-14T12:00:00Z",
+            "stripeCustomerId": "cus_proration",
+            "stripeSubscriptionId": "sub_proration",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": "STRIPE_CUSTOMER#cus_proration",
+            "sk": "META",
+            "kind": "stripeCustomerIndex",
+            "accountId": account_id,
+            "createdAt": "2026-05-14T12:00:00Z",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    webhook_event = {
+        "id": "evt_invoice_payment_succeeded_proration",
+        "type": "invoice.payment_succeeded",
+        "data": {
+            "object": {
+                "id": "in_proration_123",
+                "customer": "cus_proration",
+                "subscription": "sub_proration",
+                "billing_reason": "subscription_update",
+                "metadata": {},
+                "lines": {
+                    "data": [
+                        {
+                            "amount": -1200,
+                            "period": {"end": 1781438400},
+                            "pricing": {
+                                "price_details": {
+                                    "price": "price_monthly_basic",
+                                }
+                            },
+                        },
+                        {
+                            "amount": 4700,
+                            "period": {"end": 1781438400},
+                            "pricing": {
+                                "price_details": {
+                                    "price": "price_monthly_max",
+                                }
+                            },
+                        },
+                    ]
+                },
+            }
+        },
+    }
+    _install_fake_stripe(monkeypatch, webhook_events=[webhook_event])
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={
+            "monthlyBasic": "price_monthly_basic",
+            "monthlyMax": "price_monthly_max",
+        },
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=webhook_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert_quota_snapshot(
+        body["quota"],
+        plan_id="monthlyMax",
+        monthly_remaining=49250,
+        topup_remaining=0,
+        monthly_consumed=750,
+    )
+    grants = _dynamodb_items(table, kind="quotaGrant")
+    assert [grant["productId"] for grant in grants] == ["monthlyBasic", "monthlyMax"]
+    assert [grant["quantity"] for grant in grants] == [3000, 47000]
+
+
 def test_stripe_one_time_checkout_webhook_grants_topup_for_active_monthly_account(
     load_lambda_handler,
     monkeypatch,

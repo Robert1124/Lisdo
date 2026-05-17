@@ -520,6 +520,11 @@ def _handle_subscription_lifecycle(
 
 
 def _invoice_product_and_period_end(config: DevConfig, invoice: Any) -> tuple[StripeProduct, str | None]:
+    if _optional_string(invoice, "billing_reason") == "subscription_update":
+        positive_recurring_line = _positive_recurring_invoice_product_and_period_end(config, invoice)
+        if positive_recurring_line is not None:
+            return positive_recurring_line
+
     metadata_product_id = _product_id_from_invoice_metadata(invoice)
     if metadata_product_id is not None:
         product = PRODUCTS.get(metadata_product_id)
@@ -528,6 +533,35 @@ def _invoice_product_and_period_end(config: DevConfig, invoice: Any) -> tuple[St
 
     price_id, period_end = _invoice_price_and_period_end(invoice)
     return _product_for_price(config, price_id), period_end
+
+
+def _positive_recurring_invoice_product_and_period_end(
+    config: DevConfig,
+    invoice: Any,
+) -> tuple[StripeProduct, str | None] | None:
+    for line_item in _invoice_line_items(invoice):
+        if not _invoice_line_amount_is_positive(line_item):
+            continue
+        price_id = _price_id_from_invoice_line(line_item)
+        if price_id is None:
+            continue
+        try:
+            product = _product_for_price(config, price_id)
+        except StripeWebhookError:
+            continue
+        if product.kind != "autoRenewableSubscription":
+            continue
+        period = _object_value(line_item, "period")
+        period_end = _object_value(period, "end")
+        return product, _unix_timestamp_to_iso(period_end)
+    return None
+
+
+def _invoice_line_amount_is_positive(line_item: Any) -> bool:
+    amount = _object_value(line_item, "amount")
+    if isinstance(amount, bool):
+        return False
+    return isinstance(amount, (int, float)) and amount > 0
 
 
 def _product_id_from_invoice_metadata(invoice: Any) -> str | None:

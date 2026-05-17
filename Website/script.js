@@ -615,6 +615,9 @@ const webSession = {
 };
 const APPLE_AUTH_REQUEST_STORAGE_KEY = "lisdoAppleAuthRequest";
 const APPLE_AUTH_REQUEST_MAX_AGE_MS = 10 * 60 * 1000;
+const BILLING_RETURN_PARAM = "billing";
+const BILLING_RETURN_VALUE = "return";
+const ACCOUNT_RETURN_REFRESH_DELAYS_MS = [0, 1000, 2500, 5000, 8000];
 let accountState = {
   account: null,
   profile: null,
@@ -1046,7 +1049,10 @@ async function changeSubscription(productId) {
 async function openPlanChangePortal(productId) {
   setCheckoutStatus("plans.portalOpening");
   try {
-    const payload = await lisdoApiPost("/v1/stripe/billing-portal/session", { productId }, "plans.portalOpening");
+    const payload = await lisdoApiPost("/v1/stripe/billing-portal/session", {
+      productId,
+      returnUrl: billingReturnUrl()
+    }, "plans.portalOpening");
     if (payload.url) {
       window.location.assign(payload.url);
       return;
@@ -1082,7 +1088,9 @@ async function openBillingPortal() {
   }
   setCheckoutStatus("plans.portalOpening");
   try {
-    const payload = await lisdoApiPost("/v1/stripe/billing-portal/session", {}, "plans.portalOpening");
+    const payload = await lisdoApiPost("/v1/stripe/billing-portal/session", {
+      returnUrl: billingReturnUrl()
+    }, "plans.portalOpening");
     if (payload.url) {
       window.location.assign(payload.url);
       return;
@@ -1283,6 +1291,38 @@ function accountURL(productId) {
     url.searchParams.set("plan", productId);
   }
   return `${url.pathname}${url.search}`;
+}
+
+function billingReturnUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.set(BILLING_RETURN_PARAM, BILLING_RETURN_VALUE);
+  url.searchParams.delete("checkout");
+  return url.href;
+}
+
+function hasReturnMarker(key, value) {
+  const query = new URLSearchParams(window.location.search);
+  const hashParams = hashSearchParams();
+  return query.get(key) === value || hashParams.get(key) === value;
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function pollAccountCenterRefresh(statusKey) {
+  if (!document.querySelector("[data-account-center]")) {
+    return;
+  }
+  for (const delay of ACCOUNT_RETURN_REFRESH_DELAYS_MS) {
+    if (delay > 0) {
+      await wait(delay);
+    }
+    if (statusKey) {
+      setCheckoutStatus(statusKey);
+    }
+    await refreshAccountCenter();
+  }
 }
 
 async function refreshAccountCenter() {
@@ -1621,10 +1661,18 @@ applyLanguage(currentLang);
 updateAccountLinks();
 updateWebAccountUI();
 renderAccountCenter();
-if (new URLSearchParams(window.location.search).get("checkout") === "success" || hashSearchParams().get("checkout") === "success") {
+const checkoutReturnedSuccessfully = hasReturnMarker("checkout", "success");
+const billingPortalReturned = hasReturnMarker(BILLING_RETURN_PARAM, BILLING_RETURN_VALUE);
+if (checkoutReturnedSuccessfully) {
   setCheckoutStatus("plans.checkoutSuccess");
 }
 if (!handleAppleRedirectAuth()) {
-  refreshAccountCenter();
+  if (checkoutReturnedSuccessfully) {
+    pollAccountCenterRefresh("plans.checkoutSuccess");
+  } else if (billingPortalReturned) {
+    pollAccountCenterRefresh();
+  } else {
+    refreshAccountCenter();
+  }
 }
 loadGitHubReleases();
