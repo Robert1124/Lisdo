@@ -8,6 +8,7 @@ from typing import Any
 from .config import DevConfig, config_for_account
 from .entitlements import is_active_monthly_plan, normalize_plan
 from .quota import (
+    account_has_product_history,
     account_id_for_stripe_customer,
     apply_external_billing_grant,
     attach_stripe_customer,
@@ -38,6 +39,13 @@ NON_STRIPE_PLAN_CHANGE_MESSAGE = (
     "stays active until this billing period ends; after it expires, subscribe on "
     "the web and the new plan starts next billing period."
 )
+
+STARTER_TRIAL_UNAVAILABLE_MESSAGE = (
+    "Starter Trial is only available once and cannot be purchased while another "
+    "Lisdo plan is active."
+)
+
+STARTER_TRIAL_PRODUCT_IDS = {"starterTrial", "com.yiwenwu.Lisdo.starterTrial"}
 
 
 @dataclass(frozen=True)
@@ -118,6 +126,11 @@ def create_checkout_session(
     product = _product_for_id(product_id)
     state = load_state(config)
     has_active_monthly_quota = is_active_monthly_plan(state.plan_id) and state.monthly_limit > 0
+    if product.product_id == "starterTrial" and (
+        normalize_plan(state.plan_id) != "free"
+        or account_has_product_history(config, STARTER_TRIAL_PRODUCT_IDS)
+    ):
+        raise StripeCheckoutError(STARTER_TRIAL_UNAVAILABLE_MESSAGE)
     if product.kind == "consumableTopUp" and not has_active_monthly_quota:
         raise PermissionError("Top-up usage requires an active monthly plan.")
     if product.mode == "subscription" and has_active_monthly_quota:
@@ -174,10 +187,11 @@ def create_billing_portal_session(
     return_url: str | None = None,
     product_id: str | None = None,
 ) -> dict[str, str]:
+    if load_state(config).billing_source == "storekit":
+        raise StripeCheckoutError(NON_STRIPE_PLAN_CHANGE_MESSAGE)
+
     customer_id = stripe_customer_id_for_account(config)
     if customer_id is None:
-        if product_id and load_state(config).billing_source == "storekit":
-            raise StripeCheckoutError(NON_STRIPE_PLAN_CHANGE_MESSAGE)
         raise StripeCheckoutError("This account does not have Stripe billing history yet.")
 
     stripe = _configured_stripe(_stripe_secret_key(config))

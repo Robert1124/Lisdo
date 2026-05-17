@@ -393,41 +393,71 @@ struct LisdoMacProviderSettingsView: View {
     }
 
     private var planSettingsTab: some View {
-        Form {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Lisdo account")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(LisdoMacTheme.ink1)
+
                 if hasLisdoAccountSession {
                     signedInLisdoAccountCard
                 } else {
                     signedOutLisdoAccountCard
                 }
-            } header: {
-                Text("Lisdo account")
-            }
 
-            Section {
-                Picker("Plan", selection: Binding(
-                    get: { entitlementStore.selectedTier },
-                    set: { selectPlan($0) }
-                )) {
-                    ForEach(LisdoPlanTier.allCases, id: \.self) { tier in
-                        Text(tier.lisdoDisplayName).tag(tier)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Plan")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(LisdoMacTheme.ink1)
+
+                        Spacer(minLength: 12)
+
+                        Link(destination: personalCenterURL) {
+                            Label("Manage subscription", systemImage: "arrow.up.right")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(LisdoMacTheme.ink1)
                     }
-                }
-                .pickerStyle(.menu)
 
-                LabeledContent("Sync") {
-                    Text(iCloudSyncStatusMonitor.snapshot.title)
+                    planSummaryCard
                 }
-
-                LabeledContent("Lisdo") {
-                    Text(entitlementStore.snapshot.isFeatureEnabled(.lisdoManagedDrafts) ? "Enabled" : "Upgrade required")
-                }
-
-            } header: {
-                Text("Plan")
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .lisdoSettingsFormSurface()
+    }
+
+    private var planSummaryCard: some View {
+        VStack(spacing: 0) {
+            planSummaryRow(label: "Plan", value: planDisplaySnapshot.tier.lisdoDisplayName)
+            Divider().opacity(0.55)
+            planSummaryRow(
+                label: "Sync",
+                value: planDisplaySnapshot.isFeatureEnabled(.iCloudSync) ? "iCloud sync active" : "Local only"
+            )
+            Divider().opacity(0.55)
+            planSummaryRow(
+                label: "Lisdo",
+                value: planDisplaySnapshot.isFeatureEnabled(.lisdoManagedDrafts) ? "Enabled" : "Upgrade required"
+            )
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(LisdoMacTheme.surface2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func planSummaryRow(label: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.callout)
+                .foregroundStyle(LisdoMacTheme.ink1)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.callout)
+                .foregroundStyle(LisdoMacTheme.ink3)
+        }
+        .frame(minHeight: 36)
     }
 
     @ViewBuilder
@@ -447,7 +477,7 @@ struct LisdoMacProviderSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 SignInWithAppleButton(.signIn) { request in
-                    request.requestedScopes = [.email]
+                    request.requestedScopes = [.fullName, .email]
                 } onCompletion: { result in
                     beginAppleSignInAuthentication(result)
                 }
@@ -467,40 +497,122 @@ struct LisdoMacProviderSettingsView: View {
 
     @ViewBuilder
     private var signedInLisdoAccountCard: some View {
-        let summary = accountSessionService.currentAccountSummary()
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                Image(systemName: "person.crop.circle.fill.badge.checkmark")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(LisdoMacTheme.ink1)
-            }
-            .frame(width: 52, height: 52)
+        HStack(spacing: 16) {
+            accountAvatar
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(summary?.displayLabel ?? "Lisdo account")
-                    .font(.headline.weight(.semibold))
+                Text(accountProfileName)
+                    .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(LisdoMacTheme.ink1)
-                Text("Signed in on this Mac")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if !accountStatus.isEmpty {
-                    Text(accountStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+
+                if let detail = accountProfileDetail {
+                    Text(detail)
+                        .font(.system(size: 14))
+                        .foregroundStyle(LisdoMacTheme.ink3)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
                 }
             }
 
             Spacer(minLength: 0)
+
+            accountSignOutButton
         }
-        .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.08), lineWidth: 1)
+        .padding(18)
+        .frame(minHeight: 104)
+        .lisdoGlassSurface(cornerRadius: 28, tint: LisdoMacTheme.surface.opacity(0.18))
+    }
+
+    @ViewBuilder
+    private var accountAvatar: some View {
+        let initial = accountAvatarInitial
+#if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            ZStack {
+                Circle()
+                    .fill(LisdoMacTheme.surface.opacity(0.1))
+                if let initial {
+                    Text(initial)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(LisdoMacTheme.ink1)
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(LisdoMacTheme.ink2)
+                }
+            }
+            .frame(width: 64, height: 64)
+            .glassEffect(.regular, in: Circle())
+        } else {
+            accountAvatarFallback(initial: initial)
         }
+#else
+        accountAvatarFallback(initial: initial)
+#endif
+    }
+
+    private func accountAvatarFallback(initial: String?) -> some View {
+        ZStack {
+            Circle()
+                .fill(LisdoMacTheme.surface3)
+            if let initial {
+                Text(initial)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(LisdoMacTheme.ink1)
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(LisdoMacTheme.ink2)
+            }
+        }
+        .frame(width: 64, height: 64)
+    }
+
+    @ViewBuilder
+    private var accountSignOutButton: some View {
+#if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            Button {
+                signOutLisdoAccount()
+            } label: {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(LisdoMacTheme.ink2)
+                    .frame(width: 54, height: 54)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: Circle())
+            .accessibilityLabel("Sign out")
+            .disabled(isAuthenticatingLisdoAccount)
+        } else {
+            accountSignOutButtonFallback
+        }
+#else
+        accountSignOutButtonFallback
+#endif
+    }
+
+    private var accountSignOutButtonFallback: some View {
+        Button {
+            signOutLisdoAccount()
+        } label: {
+            Image(systemName: "rectangle.portrait.and.arrow.right")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(LisdoMacTheme.ink2)
+                .frame(width: 54, height: 54)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(LisdoMacTheme.divider.opacity(0.65), lineWidth: 1)
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sign out")
+        .disabled(isAuthenticatingLisdoAccount)
     }
 
 
@@ -624,6 +736,41 @@ struct LisdoMacProviderSettingsView: View {
 
     private var hasLisdoAccountSession: Bool {
         accountSessionService.currentLisdoBearerToken() != nil
+    }
+
+    private var accountSummary: LisdoAccountSessionSummary? {
+        accountSessionService.currentAccountSummary()
+    }
+
+    private var accountProfileName: String {
+        if let name = accountSummary?.fullName?.lisdoTrimmed, !name.isEmpty {
+            return name
+        }
+
+        if let email = accountSummary?.email?.lisdoTrimmed, !email.isEmpty,
+           let localPart = email.split(separator: "@").first, !localPart.isEmpty {
+            return String(localPart)
+        }
+
+        let label = accountSummary?.displayLabel.lisdoTrimmed
+        guard let label, !label.isEmpty else {
+            return "Lisdo User"
+        }
+        return label
+    }
+
+    private var accountProfileDetail: String? {
+        let email = accountSummary?.email?.lisdoTrimmed
+        guard let email, !email.isEmpty, email != accountProfileName else { return nil }
+        return email
+    }
+
+    private var accountAvatarInitial: String? {
+        accountProfileName.lisdoTrimmed.first.map { String($0).uppercased() }
+    }
+
+    private var planDisplaySnapshot: LisdoEntitlementSnapshot {
+        entitlementStore.effectiveSnapshot
     }
 
     private var lisdoProviderGateDecision: LisdoManagedProviderGateDecision {
@@ -1069,14 +1216,21 @@ struct LisdoMacProviderSettingsView: View {
                 return
             }
             let authorizationCode = credential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) }
-            Task { await authenticateLisdoAccount(identityToken: identityToken, authorizationCode: authorizationCode) }
+            let fullName = credential.fullName.map { PersonNameComponentsFormatter().string(from: $0) }
+            Task {
+                await authenticateLisdoAccount(
+                    identityToken: identityToken,
+                    authorizationCode: authorizationCode,
+                    fullName: fullName
+                )
+            }
         case .failure(let error):
             accountStatus = "Apple sign in failed: \(error.localizedDescription)"
         }
     }
 
     @MainActor
-    private func authenticateLisdoAccount(identityToken: String, authorizationCode: String?) async {
+    private func authenticateLisdoAccount(identityToken: String, authorizationCode: String?, fullName: String?) async {
         guard !isAuthenticatingLisdoAccount else { return }
         isAuthenticatingLisdoAccount = true
         accountStatus = "Signing in to Lisdo..."
@@ -1085,7 +1239,8 @@ struct LisdoMacProviderSettingsView: View {
         do {
             _ = try await accountSessionService.authenticateWithApple(
                 identityToken: identityToken,
-                authorizationCode: authorizationCode
+                authorizationCode: authorizationCode,
+                fullName: fullName
             )
             loadProviderFields()
             await refreshLisdoBackendIfConfigured(silent: true)
@@ -1216,20 +1371,19 @@ struct LisdoMacProviderSettingsView: View {
         }
     }
 
-    private func selectPlan(_ tier: LisdoPlanTier) {
-        let nextSnapshot = entitlementStore.updateSelectedTier(tier)
-        let nextDecision = LisdoManagedProviderGate.decision(
-            snapshot: nextSnapshot,
-            hasLisdoAccountSession: hasLisdoAccountSession
-        )
-
-        if nextDecision == .allowed {
-            providerConfigurationVisibility = .viewing
-            if updateSelectedProviderMode(.lisdoManaged) {
-                providerStatus = "Lisdo selected for this plan."
+    private func signOutLisdoAccount() {
+        do {
+            try accountSessionService.signOut()
+            backendRefreshStatus = ""
+            accountStatus = "Signed out."
+            entitlementStore.clearServerSnapshot(resetTo: .free)
+            if providerMode == .lisdoManaged {
+                fallbackFromUnavailableLisdo(statusMessage: lisdoProviderUnavailableStatus(for: .requiresSignIn))
+            } else {
+                loadProviderFields()
             }
-        } else if providerMode == .lisdoManaged {
-            fallbackFromUnavailableLisdo(statusMessage: lisdoProviderUnavailableStatus(for: nextDecision))
+        } catch {
+            accountStatus = "Sign out failed: \(error.localizedDescription)"
         }
     }
 

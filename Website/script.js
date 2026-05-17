@@ -123,7 +123,7 @@ const copy = {
     "plans.topupTitle": "Top-up Usage",
     "plans.topupBody": "为有效月费账号补充可顺延额度。每月额度会优先使用。",
     "plans.perMonth": "/mo",
-    "plans.buyTrial": "购买试用",
+    "plans.buyTrial": "Purchase",
     "plans.subscribe": "订阅",
     "plans.currentPlan": "当前套餐",
     "plans.managePlan": "管理套餐",
@@ -146,6 +146,8 @@ const copy = {
     "plans.confirmDowngradeBody": "确认后，Lisdo 会在 Stripe 安排降级。当前套餐会持续到本账单周期结束，新套餐会从下个账单周期自动开始。",
     "plans.storekitPlanTitle": "先取消 App Store 订阅",
     "plans.storekitPlanBody": "这个套餐是通过 App Store / StoreKit 购买的，Stripe 不能直接修改。请先到 Apple 订阅里取消自动续订；当前 App Store 套餐会持续到本账单周期结束。等它到期后再回到这里订阅网页套餐，新套餐会从下个账单周期开始生效，避免重复扣费。",
+    "plans.starterUnavailableTitle": "Starter Trial 无法购买",
+    "plans.starterUnavailableBody": "Starter Trial 只能购买一次，并且不能在已有 Lisdo plan 时购买。请直接管理当前套餐或等待当前套餐结束后选择月费套餐。",
     "plans.signInUnavailable": "网页 Sign in with Apple 尚未配置。请从 Lisdo app 打开此页面。",
     "plans.signInFailed": "Sign in with Apple 未完成。请重试。",
     "plans.modalTitle": "无法继续",
@@ -394,7 +396,7 @@ const copy = {
     "plans.topupTitle": "Top-up Usage",
     "plans.topupBody": "Rollover quota for active monthly accounts. Monthly quota is used first.",
     "plans.perMonth": "/mo",
-    "plans.buyTrial": "Buy trial",
+    "plans.buyTrial": "Purchase",
     "plans.subscribe": "Subscribe",
     "plans.currentPlan": "Current",
     "plans.managePlan": "Manage plan",
@@ -417,6 +419,8 @@ const copy = {
     "plans.confirmDowngradeBody": "After you confirm, Lisdo schedules the downgrade in Stripe. Your current plan stays active until this billing period ends, and the new plan starts automatically next billing period.",
     "plans.storekitPlanTitle": "Cancel the App Store subscription first",
     "plans.storekitPlanBody": "This plan was purchased through App Store / StoreKit, so Stripe cannot modify it directly. Cancel auto-renewal in Apple Subscriptions first; your current App Store plan stays active until this billing period ends. After it expires, come back here to subscribe on the web. The new web plan starts next billing period, avoiding duplicate billing.",
+    "plans.starterUnavailableTitle": "Starter Trial unavailable",
+    "plans.starterUnavailableBody": "Starter Trial can only be purchased once, and it cannot be purchased while another Lisdo plan is active. Manage the current plan or choose a monthly plan after the current plan ends.",
     "plans.signInUnavailable": "Web Sign in with Apple is not configured yet. Open this page from the Lisdo app.",
     "plans.signInFailed": "Sign in with Apple did not complete. Try again.",
     "plans.modalTitle": "Unable to continue",
@@ -975,6 +979,10 @@ async function startCheckout(productId) {
     return;
   }
   const activePlan = accountState.quota && accountState.quota.planId ? accountState.quota.planId : "";
+  if (productId === "starterTrial" && hasAnyActivePlan()) {
+    showStarterTrialUnavailableModal();
+    return;
+  }
   if (isActiveMonthlyPlan(productId) && hasActiveMonthlyQuota()) {
     if (productId === activePlan) {
       setCheckoutStatus("plans.checkoutReady");
@@ -1004,6 +1012,10 @@ async function startCheckout(productId) {
     }
     throw new Error("missing checkout url");
   } catch (error) {
+    if (productId === "starterTrial") {
+      showStarterTrialUnavailableModal(error);
+      return;
+    }
     setCheckoutStatus(error.message === "missing-session" ? "plans.checkoutNeedsSession" : "plans.checkoutFailed");
   }
 }
@@ -1012,6 +1024,24 @@ function showStoreKitPlanChangeModal() {
   showCheckoutModal(copy[currentLang]["plans.storekitPlanBody"], {
     titleKey: "plans.storekitPlanTitle"
   });
+}
+
+function showStarterTrialUnavailableModal(error) {
+  const fallback = copy[currentLang]["plans.starterUnavailableBody"];
+  showCheckoutModal(starterTrialErrorMessage(error) || fallback, {
+    titleKey: "plans.starterUnavailableTitle"
+  });
+}
+
+function starterTrialErrorMessage(error) {
+  if (!error || typeof error.message !== "string") {
+    return "";
+  }
+  const message = error.message.trim();
+  if (!message || /^HTTP\s+\d+$/i.test(message)) {
+    return "";
+  }
+  return message;
 }
 
 function confirmSubscriptionChange(productId, activePlan) {
@@ -1086,6 +1116,10 @@ async function openBillingPortal() {
     setCheckoutStatus("plans.checkoutNeedsSession");
     return;
   }
+  if (isStoreKitManagedMonthlyPlan()) {
+    showStoreKitPlanChangeModal();
+    return;
+  }
   setCheckoutStatus("plans.portalOpening");
   try {
     const payload = await lisdoApiPost("/v1/stripe/billing-portal/session", {
@@ -1097,7 +1131,13 @@ async function openBillingPortal() {
     }
     throw new Error("missing portal url");
   } catch (error) {
-    setCheckoutStatus(error.message === "missing-session" ? "plans.checkoutNeedsSession" : "plans.checkoutFailed");
+    if (error.message === "missing-session") {
+      setCheckoutStatus("plans.checkoutNeedsSession");
+      return;
+    }
+    showCheckoutModal(planChangeErrorMessage(error), {
+      titleKey: "plans.modalTitle"
+    });
   }
 }
 
@@ -1465,10 +1505,13 @@ function updatePlanSelection() {
       return;
     }
     const productId = button.dataset.checkoutProduct || "";
+    const isStarterTrial = productId === "starterTrial";
     const isCurrentActivePlan = Boolean(activePlan && productId === activePlan);
     const isMonthlyChange = activeMonthlyQuota && isActiveMonthlyPlan(activePlan) && isActiveMonthlyPlan(productId);
-    button.disabled = isCurrentActivePlan;
-    button.textContent = isCurrentActivePlan
+    button.disabled = isCurrentActivePlan && !isStarterTrial;
+    button.textContent = isStarterTrial
+      ? copy[currentLang]["plans.buyTrial"]
+      : isCurrentActivePlan
       ? copy[currentLang]["plans.currentPlan"]
       : isMonthlyChange
         ? copy[currentLang]["plans.switchPlan"]
@@ -1501,6 +1544,11 @@ function planName(planId) {
 
 function isActiveMonthlyPlan(planId) {
   return ["monthlyBasic", "monthlyPlus", "monthlyMax"].includes(planId);
+}
+
+function hasAnyActivePlan() {
+  const quota = accountState.quota;
+  return Boolean(quota && quota.planId && quota.planId !== "free");
 }
 
 function currentBillingSource() {

@@ -377,6 +377,17 @@ def stripe_customer_id_for_account(config: DevConfig) -> str | None:
     return customer_id if isinstance(customer_id, str) and customer_id else None
 
 
+def account_has_product_history(config: DevConfig, product_ids: set[str]) -> bool:
+    if not _uses_dynamodb(config):
+        return False
+    normalized_product_ids = {product_id for product_id in product_ids if product_id}
+    if not normalized_product_ids:
+        return False
+    table = _dynamodb_table(config)
+    pk = _account_pk(config.account_id)
+    return any(item.get("productId") in normalized_product_ids for item in _query_account_items(table, pk))
+
+
 def account_id_for_stripe_customer(config: DevConfig, customer_id: str) -> str | None:
     if not _uses_dynamodb(config):
         return None
