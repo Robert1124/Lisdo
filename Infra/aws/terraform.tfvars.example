@@ -28,5 +28,11 @@ stripe_price_monthly_plus        = "price_1TXVzGDtC3pOtIXhANnbaAtR"
 stripe_price_monthly_max         = "price_1TXVzmDtC3pOtIXhVwMgWl5o"
 stripe_price_top_up_usage        = "price_1TXW0ADtC3pOtIXhMY4HfRSJ"
 
+# Resend transactional email. Store the API key in SSM SecureString, not here:
+#   aws ssm put-parameter --name /lisdo/staging/resend/api-key --type SecureString --value re_...
+email_from    = "Lisdo <hello@lisdo.robertw.me>"
+app_base_url  = "https://lisdo.robertw.me/account.html"
+emails_enabled = true
+
 # Override locally; do not commit a production token in tfvars.
 dev_session_token = "dev-token"

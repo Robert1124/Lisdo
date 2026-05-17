@@ -6,9 +6,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import DevConfig, config_for_account
+from .email import EmailResult, send_billing_success_email
 from .entitlements import is_active_monthly_plan, normalize_plan
 from .quota import (
     account_has_product_history,
+    account_has_billing_event,
     account_id_for_stripe_customer,
     apply_external_billing_grant,
     attach_stripe_customer,
@@ -423,10 +425,12 @@ def _handle_checkout_completed(config: DevConfig, event_type: str, session: Any)
         }
 
     product = _product_for_id(product_id)
+    event_id = _required_string(session, "id")
+    is_duplicate_event = account_has_billing_event(account_config, source="stripe", external_event_id=event_id)
     state = apply_external_billing_grant(
         account_config,
         source="stripe",
-        external_event_id=_required_string(session, "id"),
+        external_event_id=event_id,
         product_id=product.product_id,
         product_kind=product.kind,
         plan_id=product.plan_id,
@@ -434,10 +438,18 @@ def _handle_checkout_completed(config: DevConfig, event_type: str, session: Any)
         topup_quota=product.topup_quota,
         customer_id=customer_id,
     )
+    email_result = _billing_email_result(
+        account_config,
+        product=product,
+        is_renewal=False,
+        event_id=event_id,
+        was_duplicate_event=is_duplicate_event,
+    )
     return {
         "status": "processed",
         "eventType": event_type,
         "quota": state.snapshot(),
+        "email": {"receipt": email_result.status},
     }
 
 
@@ -451,11 +463,13 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
     attach_stripe_customer(account_config, customer_id)
     subscription_id = _subscription_id_from_invoice(invoice)
     billing_reason = _optional_string(invoice, "billing_reason")
+    invoice_id = _required_string(invoice, "id")
+    is_duplicate_event = account_has_billing_event(account_config, source="stripe", external_event_id=invoice_id)
     if billing_reason == "subscription_cycle" and product.kind == "autoRenewableSubscription":
         state = replace_external_monthly_entitlement(
             account_config,
             source="stripe",
-            external_event_id=_required_string(invoice, "id"),
+            external_event_id=invoice_id,
             product_id=product.product_id,
             plan_id=product.plan_id or "free",
             monthly_quota=product.monthly_quota,
@@ -464,10 +478,19 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
             customer_id=customer_id,
             subscription_id=subscription_id,
         )
+        email_result = _billing_email_result(
+            account_config,
+            product=product,
+            is_renewal=True,
+            event_id=invoice_id,
+            invoice=invoice,
+            was_duplicate_event=is_duplicate_event,
+        )
         return {
             "status": "processed",
             "eventType": event_type,
             "quota": state.snapshot(),
+            "email": {"receipt": email_result.status},
         }
 
     monthly_quota = product.monthly_quota
@@ -478,7 +501,7 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
     state = apply_external_billing_grant(
         account_config,
         source="stripe",
-        external_event_id=_required_string(invoice, "id"),
+        external_event_id=invoice_id,
         product_id=product.product_id,
         product_kind=product.kind,
         plan_id=product.plan_id,
@@ -488,10 +511,19 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
         customer_id=customer_id,
         subscription_id=subscription_id,
     )
+    email_result = _billing_email_result(
+        account_config,
+        product=product,
+        is_renewal=False,
+        event_id=invoice_id,
+        invoice=invoice,
+        was_duplicate_event=is_duplicate_event,
+    )
     return {
         "status": "processed",
         "eventType": event_type,
         "quota": state.snapshot(),
+        "email": {"receipt": email_result.status},
     }
 
 
@@ -577,6 +609,39 @@ def _handle_subscription_lifecycle(
         "reason": "subscription_active",
         "quota": load_state(account_config).snapshot(),
     }
+
+
+def _billing_email_result(
+    account_config: DevConfig,
+    *,
+    product: StripeProduct,
+    is_renewal: bool,
+    event_id: str,
+    invoice: Any | None = None,
+    was_duplicate_event: bool,
+) -> EmailResult:
+    if was_duplicate_event:
+        return EmailResult("skipped_duplicate_event")
+    return send_billing_success_email(
+        account_config,
+        product_name=_product_display_name(product),
+        is_renewal=is_renewal,
+        event_id=event_id,
+        invoice_id=_optional_string(invoice, "id") if invoice is not None else None,
+        hosted_invoice_url=_optional_string(invoice, "hosted_invoice_url") if invoice is not None else None,
+        invoice_pdf_url=_optional_string(invoice, "invoice_pdf") if invoice is not None else None,
+    )
+
+
+def _product_display_name(product: StripeProduct) -> str:
+    names = {
+        "starterTrial": "Starter Trial",
+        "monthlyBasic": "Monthly Basic",
+        "monthlyPlus": "Monthly Plus",
+        "monthlyMax": "Monthly Max",
+        "topUpUsage": "Top-up Usage",
+    }
+    return names.get(product.product_id, product.product_id)
 
 
 def _invoice_product_and_period_end(config: DevConfig, invoice: Any) -> tuple[StripeProduct, str | None]:

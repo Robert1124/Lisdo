@@ -23,10 +23,18 @@ output "apple_server_api_settings_parameter_name" {
   value       = local.apple_server_api_settings_parameter_name
 }
 
+output "resend_api_key_parameter_name" {
+  description = "SSM Parameter Store name for the Resend API key."
+  value       = local.resend_api_key_parameter_name
+}
+
 output "parameter_names" {
   description = "SSM Parameter Store names used by the staging backend. Values are never managed by Terraform."
   value = {
     apple_server_api_settings = local.apple_server_api_settings_parameter_name
     openai_api_key            = local.openai_api_key_parameter_name
+    resend_api_key            = local.resend_api_key_parameter_name
+    stripe_secret_key         = local.stripe_secret_key_parameter_name
+    stripe_webhook_secret     = local.stripe_webhook_secret_parameter_name
   }
 }

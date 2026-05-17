@@ -41,6 +41,7 @@ resource "aws_lambda_function" "api" {
       LISDO_STOREKIT_VERIFICATION_MODE         = var.storekit_verification_mode
       OPENAI_API_KEY_PARAMETER_NAME            = local.openai_api_key_parameter_name
       PROJECT                                  = var.project
+      RESEND_API_KEY_PARAMETER_NAME            = local.resend_api_key_parameter_name
       STRIPE_AUTOMATIC_TAX_ENABLED             = tostring(var.stripe_automatic_tax_enabled)
       STRIPE_BILLING_PORTAL_RETURN_URL         = var.stripe_billing_portal_return_url
       STRIPE_CHECKOUT_CANCEL_URL               = var.stripe_checkout_cancel_url
@@ -52,6 +53,9 @@ resource "aws_lambda_function" "api" {
       STRIPE_PRICE_TOP_UP_USAGE                = var.stripe_price_top_up_usage
       STRIPE_SECRET_KEY_PARAMETER_NAME         = local.stripe_secret_key_parameter_name
       STRIPE_WEBHOOK_SECRET_PARAMETER_NAME     = local.stripe_webhook_secret_parameter_name
+      LISDO_APP_BASE_URL                       = var.app_base_url
+      LISDO_EMAIL_FROM                         = var.email_from
+      LISDO_EMAILS_ENABLED                     = tostring(var.emails_enabled)
     }
   }
 

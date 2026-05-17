@@ -9,6 +9,7 @@ from . import providers
 from .apple_auth import AppleIdentityTokenError, account_id_for_apple_subject, verify_apple_identity_token
 from .billing import usage_cost_units
 from .config import DevConfig, account_response, config_for_account, load_config, session_response
+from .email import send_welcome_email
 from .entitlements import draft_model_for_plan, entitlements_for_plan
 from .quota import (
     MONTHLY_BUCKET,
@@ -146,11 +147,18 @@ def _dispatch(route: tuple[str, str], request: dict[str, Any], config: DevConfig
             audience=identity.audience,
             display_name=_display_name_from_auth_body(body),
         )
+        welcome_email = send_welcome_email(
+            config_for_account(config, account_id),
+            is_new_account=bool(auth_result.get("isNewAccount")),
+        )
         return _json_response(
             200,
             {
                 "status": "authenticated",
                 **auth_result,
+                "email": {
+                    "welcome": welcome_email.status,
+                },
             },
         )
 

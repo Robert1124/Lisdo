@@ -8,7 +8,7 @@ This stack defines the AWS staging foundation for the Lisdo managed backend. It 
 - Lambda execution role and Lisdo API Lambda function package path.
 - DynamoDB on-demand single-table ledger for account, quota, session, and usage records.
 - CloudWatch log groups for Lambda and API access logs.
-- SSM Parameter Store names for OpenAI, Apple server settings, and Stripe checkout secrets.
+- SSM Parameter Store names for OpenAI, Apple server settings, Resend email, and Stripe checkout secrets.
 
 It intentionally does not create VPCs, subnets, NAT, RDS, or Secrets Manager resources. The early staging backend is serverless-only for idle cost control and simpler operations.
 
@@ -38,6 +38,7 @@ Default names:
 ```text
 /lisdo/staging/openai/api-key
 /lisdo/staging/apple/server-api-settings
+/lisdo/staging/resend/api-key
 /lisdo/staging/stripe/secret-key
 /lisdo/staging/stripe/webhook-secret
 ```
@@ -55,6 +56,21 @@ AWS_PROFILE=lisdo-staging aws ssm put-parameter \
 ```
 
 Use the same pattern for `/lisdo/staging/apple/server-api-settings`, preferably with a JSON string containing only the settings the server needs.
+
+For Resend transactional email, verify the sender/domain in Resend first, then store the API key in SSM:
+
+```sh
+AWS_PROFILE=lisdo-staging aws sso login
+
+AWS_PROFILE=lisdo-staging aws ssm put-parameter \
+  --region us-east-1 \
+  --name /lisdo/staging/resend/api-key \
+  --type SecureString \
+  --value 're_replace_with_resend_api_key' \
+  --overwrite
+```
+
+Set `email_from` in `terraform.tfvars` if the verified Resend sender is not `Lisdo <hello@lisdo.robertw.me>`.
 
 For Stripe web checkout, populate the two Stripe SecureStrings and set the Stripe Price IDs in `terraform.tfvars`. The Lambda creates Checkout Sessions and Stripe Billing Portal sessions, while `POST /v1/stripe/webhook` is the only path that writes web purchases into the account/quota ledger.
 

@@ -193,6 +193,7 @@ def create_apple_account_session(
     pk = _account_pk(account_id)
     existing_items = _query_account_items(table, pk)
     existing_account = next((item for item in existing_items if item.get("kind") == "account" and item.get("sk") == "META"), None)
+    is_new_account = existing_account is None
     plan_id = normalize_plan(existing_account.get("planId") if existing_account else "free")
     session_id = str(uuid4())
     token = secrets.token_urlsafe(32)
@@ -244,6 +245,7 @@ def create_apple_account_session(
 
     return {
         "mode": "authenticated",
+        "isNewAccount": is_new_account,
         "account": {
             "id": account_id,
             "planId": plan_id,
@@ -397,6 +399,19 @@ def account_id_for_stripe_customer(config: DevConfig, customer_id: str) -> str |
         return None
     account_id = item.get("accountId")
     return account_id if isinstance(account_id, str) and account_id else None
+
+
+def account_has_billing_event(config: DevConfig, *, source: str, external_event_id: str) -> bool:
+    if not _uses_dynamodb(config):
+        return False
+    table = _dynamodb_table(config)
+    item = table.get_item(
+        Key={
+            "pk": _account_pk(config.account_id),
+            "sk": f"{source.upper()}#{external_event_id}",
+        }
+    ).get("Item")
+    return isinstance(item, dict)
 
 
 def attach_stripe_customer(config: DevConfig, customer_id: str) -> None:

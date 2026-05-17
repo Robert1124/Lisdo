@@ -239,6 +239,15 @@ def load_lambda_handler(monkeypatch: pytest.MonkeyPatch, tmp_path) -> Callable[.
         else:
             monkeypatch.setenv("OPENAI_API_KEY_PARAMETER_NAME", openai_api_key_parameter_name)
 
+        for env_name in (
+            "RESEND_API_KEY",
+            "RESEND_API_KEY_PARAMETER_NAME",
+            "LISDO_EMAIL_FROM",
+            "LISDO_APP_BASE_URL",
+            "LISDO_EMAILS_ENABLED",
+        ):
+            monkeypatch.delenv(env_name, raising=False)
+
         if stripe_secret_key is None:
             monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
         else:

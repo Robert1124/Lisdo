@@ -207,6 +207,30 @@ variable "stripe_webhook_secret_parameter_name" {
   default     = ""
 }
 
+variable "resend_api_key_parameter_name" {
+  description = "Optional SSM SecureString parameter name for the Resend API key. Empty uses /<project>/<env>/resend/api-key."
+  type        = string
+  default     = ""
+}
+
+variable "email_from" {
+  description = "Verified Resend sender used by Lisdo transactional emails."
+  type        = string
+  default     = "Lisdo <hello@lisdo.robertw.me>"
+}
+
+variable "app_base_url" {
+  description = "Account/personal-center URL used as the default CTA in Lisdo emails."
+  type        = string
+  default     = "https://lisdo.robertw.me/account.html"
+}
+
+variable "emails_enabled" {
+  description = "Whether the Lambda attempts to send Resend transactional emails."
+  type        = bool
+  default     = true
+}
+
 variable "stripe_checkout_success_url" {
   description = "Default Stripe Checkout success URL."
   type        = string

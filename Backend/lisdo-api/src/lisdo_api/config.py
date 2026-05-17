@@ -83,6 +83,10 @@ class DevConfig:
     stripe_price_monthly_plus: str | None
     stripe_price_monthly_max: str | None
     stripe_price_top_up_usage: str | None
+    resend_api_key_parameter_name: str | None
+    email_from: str
+    app_base_url: str
+    emails_enabled: bool
 
 
 def load_config() -> DevConfig:
@@ -130,6 +134,10 @@ def load_config() -> DevConfig:
         stripe_price_monthly_plus=_optional_env("STRIPE_PRICE_MONTHLY_PLUS"),
         stripe_price_monthly_max=_optional_env("STRIPE_PRICE_MONTHLY_MAX"),
         stripe_price_top_up_usage=_optional_env("STRIPE_PRICE_TOP_UP_USAGE"),
+        resend_api_key_parameter_name=_optional_env("RESEND_API_KEY_PARAMETER_NAME"),
+        email_from=_optional_env("LISDO_EMAIL_FROM") or "Lisdo <hello@lisdo.robertw.me>",
+        app_base_url=_optional_env("LISDO_APP_BASE_URL") or "https://lisdo.robertw.me/account.html",
+        emails_enabled=_bool_env("LISDO_EMAILS_ENABLED", True),
     )
 
 
