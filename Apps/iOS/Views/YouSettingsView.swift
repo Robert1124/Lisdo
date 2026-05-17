@@ -92,26 +92,10 @@ struct YouSettingsView: View {
         .navigationTitle("You")
         .sheet(item: $activeSettingsSheet) { sheet in
             settingsSheet(for: sheet)
+                .alert(item: $settingsAlert, content: settingsAlertPresentation)
                 .presentationDragIndicator(.visible)
         }
-        .alert(item: $settingsAlert) { alert in
-            if let primaryTitle = alert.primaryTitle, let primaryAction = alert.primaryAction {
-                Alert(
-                    title: Text(alert.title),
-                    message: Text(alert.message),
-                    primaryButton: .default(Text(primaryTitle)) {
-                        handleSettingsAlertPrimaryAction(primaryAction)
-                    },
-                    secondaryButton: .cancel(Text("Cancel"))
-                )
-            } else {
-                Alert(
-                    title: Text(alert.title),
-                    message: Text(alert.message),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
-        }
+        .alert(item: $settingsAlert, content: settingsAlertPresentation)
         .onAppear {
             loadProviderSettings()
             loadAccountSessionState()
@@ -364,6 +348,25 @@ struct YouSettingsView: View {
             providerConfigurationSheet
                 .presentationDetents([.large])
         }
+    }
+
+    private func settingsAlertPresentation(_ alert: YouSettingsAlert) -> Alert {
+        if let primaryTitle = alert.primaryTitle, let primaryAction = alert.primaryAction {
+            return Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                primaryButton: .default(Text(primaryTitle)) {
+                    handleSettingsAlertPrimaryAction(primaryAction)
+                },
+                secondaryButton: .cancel(Text("Cancel"))
+            )
+        }
+
+        return Alert(
+            title: Text(alert.title),
+            message: Text(alert.message),
+            dismissButton: .default(Text("OK"))
+        )
     }
 
     private var planManagementSheet: some View {
