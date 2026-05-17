@@ -1058,6 +1058,253 @@ def test_stripe_subscription_cycle_invoice_prefers_line_price_when_metadata_is_s
     assert grants[0]["periodEnd"] == "2026-06-14T12:00:00Z"
 
 
+def test_stripe_subscription_schedule_transition_replaces_old_monthly_entitlement(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyMax",
+            "userId": "test-user",
+            "stripeCustomerId": "cus_scheduled_downgrade",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#stripe#max_cycle",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 50000,
+            "consumed": 0,
+            "source": "stripe",
+            "productId": "monthlyMax",
+            "externalEventId": "max_cycle",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-12-17T04:40:43Z",
+            "stripeCustomerId": "cus_scheduled_downgrade",
+            "stripeSubscriptionId": "sub_scheduled_downgrade",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": "STRIPE_CUSTOMER#cus_scheduled_downgrade",
+            "sk": "META",
+            "kind": "stripeCustomerIndex",
+            "accountId": account_id,
+            "createdAt": "2026-05-14T12:00:00Z",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    webhook_event = {
+        "id": "evt_subscription_schedule_transition",
+        "type": "customer.subscription.updated",
+        "data": {
+            "previous_attributes": {
+                "items": {
+                    "data": [
+                        {
+                            "id": "si_old_max",
+                            "price": {"id": "price_monthly_max"},
+                        }
+                    ]
+                },
+                "latest_invoice": "in_old_max",
+            },
+            "object": {
+                "id": "sub_scheduled_downgrade",
+                "customer": "cus_scheduled_downgrade",
+                "status": "active",
+                "schedule": "sub_sched_downgrade",
+                "metadata": {
+                    "accountId": account_id,
+                    "lisdoProductId": "monthlyMax",
+                },
+                "items": {
+                    "data": [
+                        {
+                            "id": "si_new_plus",
+                            "price": {"id": "price_monthly_plus"},
+                            "current_period_end": 1800160843,
+                        }
+                    ]
+                },
+                "latest_invoice": "in_draft_plus",
+            },
+        },
+    }
+    _install_fake_stripe(monkeypatch, webhook_events=[webhook_event])
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={
+            "monthlyPlus": "price_monthly_plus",
+            "monthlyMax": "price_monthly_max",
+        },
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=webhook_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert body["reason"] == "subscription_schedule_transition"
+    assert_quota_snapshot(body["quota"], plan_id="monthlyPlus", monthly_remaining=12000, topup_remaining=0)
+    grants = _dynamodb_items(table, kind="quotaGrant")
+    old_max_grant = next(grant for grant in grants if grant["externalEventId"] == "max_cycle")
+    new_plus_grant = next(grant for grant in grants if grant["externalEventId"] == "evt_subscription_schedule_transition")
+    assert old_max_grant["expiresAt"] == "2026-05-14T12:00:00Z"
+    assert old_max_grant["revokeReason"] == "subscription_plan_replaced"
+    assert new_plus_grant["productId"] == "monthlyPlus"
+    assert new_plus_grant["periodEnd"] == "2027-01-17T04:40:43Z"
+
+
+def test_stripe_subscription_cycle_invoice_replaces_prior_cycle_entitlement(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyMax",
+            "userId": "test-user",
+            "stripeCustomerId": "cus_cycle_replace",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#stripe#max_previous_cycle",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 50000,
+            "consumed": 0,
+            "source": "stripe",
+            "productId": "monthlyMax",
+            "externalEventId": "max_previous_cycle",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-12-17T04:40:43Z",
+            "stripeCustomerId": "cus_cycle_replace",
+            "stripeSubscriptionId": "sub_cycle_replace",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": "STRIPE_CUSTOMER#cus_cycle_replace",
+            "sk": "META",
+            "kind": "stripeCustomerIndex",
+            "accountId": account_id,
+            "createdAt": "2026-05-14T12:00:00Z",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    webhook_event = {
+        "id": "evt_invoice_payment_succeeded_cycle_replace",
+        "type": "invoice.payment_succeeded",
+        "data": {
+            "object": {
+                "id": "in_cycle_replace",
+                "customer": "cus_cycle_replace",
+                "billing_reason": "subscription_cycle",
+                "metadata": {},
+                "parent": {
+                    "subscription_details": {
+                        "metadata": {
+                            "accountId": account_id,
+                            "lisdoProductId": "monthlyMax",
+                        },
+                        "subscription": "sub_cycle_replace",
+                    },
+                    "type": "subscription_details",
+                },
+                "lines": {
+                    "data": [
+                        {
+                            "amount": 999,
+                            "metadata": {
+                                "accountId": account_id,
+                                "lisdoProductId": "monthlyMax",
+                            },
+                            "period": {"end": 1800160843},
+                            "pricing": {
+                                "price_details": {
+                                    "price": "price_monthly_plus",
+                                },
+                                "type": "price_details",
+                            },
+                            "parent": {
+                                "subscription_item_details": {
+                                    "subscription": "sub_cycle_replace",
+                                    "subscription_item": "si_cycle_replace",
+                                },
+                                "type": "subscription_item_details",
+                            },
+                        }
+                    ]
+                },
+            }
+        },
+    }
+    _install_fake_stripe(monkeypatch, webhook_events=[webhook_event])
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={
+            "monthlyPlus": "price_monthly_plus",
+            "monthlyMax": "price_monthly_max",
+        },
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=webhook_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert_quota_snapshot(body["quota"], plan_id="monthlyPlus", monthly_remaining=12000, topup_remaining=0)
+    grants = _dynamodb_items(table, kind="quotaGrant")
+    old_max_grant = next(grant for grant in grants if grant["externalEventId"] == "max_previous_cycle")
+    new_plus_grant = next(grant for grant in grants if grant["externalEventId"] == "in_cycle_replace")
+    assert old_max_grant["expiresAt"] == "2026-05-14T12:00:00Z"
+    assert old_max_grant["revokeReason"] == "subscription_cycle"
+    assert new_plus_grant["productId"] == "monthlyPlus"
+    assert new_plus_grant["periodEnd"] == "2027-01-17T04:40:43Z"
+
+
 def test_stripe_subscription_update_invoice_prefers_positive_configured_recurring_line(
     load_lambda_handler,
     monkeypatch,

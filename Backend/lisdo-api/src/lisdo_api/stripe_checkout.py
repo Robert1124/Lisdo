@@ -12,6 +12,7 @@ from .quota import (
     apply_external_billing_grant,
     attach_stripe_customer,
     load_state,
+    replace_external_monthly_entitlement,
     revoke_external_monthly_entitlement,
     stripe_customer_id_for_account,
 )
@@ -363,6 +364,7 @@ def handle_webhook(config: DevConfig, *, payload: bytes, signature: str | None) 
     event_type = _required_string(event, "type")
     data = _object_value(event, "data")
     obj = _object_value(data, "object")
+    previous_attributes = _object_value(data, "previous_attributes")
     if obj is None:
         raise StripeWebhookError("Stripe webhook event object is missing.")
 
@@ -373,7 +375,7 @@ def handle_webhook(config: DevConfig, *, payload: bytes, signature: str | None) 
     if event_type == "invoice.payment_failed":
         return _handle_invoice_payment_failed(config, event_type, obj)
     if event_type in {"customer.subscription.deleted", "customer.subscription.updated"}:
-        return _handle_subscription_lifecycle(config, event_type, event_id, obj)
+        return _handle_subscription_lifecycle(config, event_type, event_id, obj, previous_attributes)
 
     return {
         "status": "ignored",
@@ -433,8 +435,29 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
         raise StripeWebhookError("Stripe invoice is missing account metadata.")
     account_config = config_for_account(config, account_id)
     attach_stripe_customer(account_config, customer_id)
+    subscription_id = _subscription_id_from_invoice(invoice)
+    billing_reason = _optional_string(invoice, "billing_reason")
+    if billing_reason == "subscription_cycle" and product.kind == "autoRenewableSubscription":
+        state = replace_external_monthly_entitlement(
+            account_config,
+            source="stripe",
+            external_event_id=_required_string(invoice, "id"),
+            product_id=product.product_id,
+            plan_id=product.plan_id or "free",
+            monthly_quota=product.monthly_quota,
+            period_end=period_end,
+            reason="subscription_cycle",
+            customer_id=customer_id,
+            subscription_id=subscription_id,
+        )
+        return {
+            "status": "processed",
+            "eventType": event_type,
+            "quota": state.snapshot(),
+        }
+
     monthly_quota = product.monthly_quota
-    if _optional_string(invoice, "billing_reason") == "subscription_update" and product.kind == "autoRenewableSubscription":
+    if billing_reason == "subscription_update" and product.kind == "autoRenewableSubscription":
         current_state = load_state(account_config)
         monthly_quota = max(0, product.monthly_quota - current_state.monthly_limit)
 
@@ -449,7 +472,7 @@ def _handle_invoice_paid(config: DevConfig, event_type: str, invoice: Any) -> di
         topup_quota=product.topup_quota,
         period_end=period_end,
         customer_id=customer_id,
-        subscription_id=_subscription_id_from_invoice(invoice),
+        subscription_id=subscription_id,
     )
     return {
         "status": "processed",
@@ -481,6 +504,7 @@ def _handle_subscription_lifecycle(
     event_type: str,
     event_id: str,
     subscription: Any,
+    previous_attributes: Any,
 ) -> dict[str, Any]:
     customer_id = _required_string(subscription, "customer")
     account_id = _metadata(subscription).get("accountId") or account_id_for_stripe_customer(config, customer_id)
@@ -508,6 +532,28 @@ def _handle_subscription_lifecycle(
             "status": "processed",
             "eventType": event_type,
             "reason": "subscription_inactive",
+            "quota": state.snapshot(),
+        }
+
+    scheduled_transition = _scheduled_subscription_transition_product_and_period_end(config, subscription, previous_attributes)
+    if scheduled_transition is not None:
+        product, period_end = scheduled_transition
+        state = replace_external_monthly_entitlement(
+            account_config,
+            source="stripe",
+            external_event_id=event_id,
+            product_id=product.product_id,
+            plan_id=product.plan_id or "free",
+            monthly_quota=product.monthly_quota,
+            period_end=period_end,
+            reason="subscription_plan_replaced",
+            customer_id=customer_id,
+            subscription_id=subscription_id,
+        )
+        return {
+            "status": "processed",
+            "eventType": event_type,
+            "reason": "subscription_schedule_transition",
             "quota": state.snapshot(),
         }
 
@@ -557,6 +603,37 @@ def _recurring_invoice_product_and_period_end(
     if selected is None:
         return None
     return selected[0], selected[1]
+
+
+def _scheduled_subscription_transition_product_and_period_end(
+    config: DevConfig,
+    subscription: Any,
+    previous_attributes: Any,
+) -> tuple[StripeProduct, str | None] | None:
+    if _subscription_schedule_id(subscription) is None:
+        return None
+    if _object_value(previous_attributes, "items") is None:
+        return None
+    if _optional_string(subscription, "status") not in {"active", "trialing", "past_due"}:
+        return None
+    return _subscription_product_and_period_end(config, subscription)
+
+
+def _subscription_product_and_period_end(config: DevConfig, subscription: Any) -> tuple[StripeProduct, str | None] | None:
+    items = _object_value(subscription, "items")
+    for item in _object_list(items, "data"):
+        price_id = _price_id_from_subscription_item(item)
+        if price_id is None:
+            continue
+        try:
+            product = _product_for_price(config, price_id)
+        except StripeWebhookError:
+            continue
+        if product.kind != "autoRenewableSubscription":
+            continue
+        period_end = _unix_timestamp_to_iso(_subscription_period_end(subscription, item))
+        return product, period_end
+    return None
 
 
 def _invoice_line_amount_is_positive(line_item: Any) -> bool:

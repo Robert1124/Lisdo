@@ -513,6 +513,103 @@ def apply_external_billing_grant(
     return load_state(config)
 
 
+def replace_external_monthly_entitlement(
+    config: DevConfig,
+    *,
+    source: str,
+    external_event_id: str,
+    product_id: str,
+    plan_id: str,
+    monthly_quota: int,
+    period_end: str | None,
+    reason: str,
+    customer_id: str | None = None,
+    subscription_id: str | None = None,
+    original_transaction_id: str | None = None,
+) -> QuotaState:
+    if not _uses_dynamodb(config):
+        return load_state(config)
+
+    table = _dynamodb_table(config)
+    pk = _account_pk(config.account_id)
+    event_sk = f"{source.upper()}#{external_event_id}"
+    if isinstance(table.get_item(Key={"pk": pk, "sk": event_sk}).get("Item"), dict):
+        return load_state(config)
+
+    current_items = _query_account_items(table, pk)
+    account_item = next((item for item in current_items if item.get("kind") == "account" and item.get("sk") == "META"), None)
+    updated_account = dict(account_item or {})
+    if customer_id:
+        updated_account["stripeCustomerId"] = customer_id
+    _put_account_plan(table, pk, config, updated_account, plan_id)
+
+    if customer_id:
+        table.put_item(
+            Item={
+                "pk": _stripe_customer_pk(customer_id),
+                "sk": "META",
+                "kind": "stripeCustomerIndex",
+                "accountId": config.account_id,
+                "createdAt": config.now,
+                "updatedAt": config.now,
+            }
+        )
+
+    for grant in current_items:
+        if not _monthly_grant_matches_revoke(
+            grant,
+            source=source,
+            now=config.now,
+            subscription_id=subscription_id,
+            original_transaction_id=original_transaction_id,
+        ):
+            continue
+        updated_grant = dict(grant)
+        updated_grant["expiresAt"] = config.now
+        updated_grant["revokedAt"] = config.now
+        updated_grant["revokeReason"] = reason
+        table.put_item(Item=updated_grant)
+
+    if monthly_quota > 0:
+        table.put_item(
+            Item=_external_billing_grant_item(
+                pk,
+                MONTHLY_BUCKET,
+                monthly_quota,
+                source,
+                config,
+                product_id,
+                external_event_id,
+                period_end,
+                customer_id,
+                subscription_id,
+            ),
+            ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
+        )
+
+    event_item = {
+        "pk": pk,
+        "sk": event_sk,
+        "kind": f"{source}BillingEvent",
+        "source": source,
+        "externalEventId": external_event_id,
+        "eventType": "monthlyEntitlementReplaced",
+        "reason": reason,
+        "productId": product_id,
+        "createdAt": config.now,
+    }
+    if customer_id:
+        event_item["stripeCustomerId"] = customer_id
+    if subscription_id:
+        event_item["stripeSubscriptionId"] = subscription_id
+    if period_end:
+        event_item["periodEnd"] = period_end
+    if original_transaction_id:
+        event_item["originalTransactionId"] = original_transaction_id
+    table.put_item(Item=event_item, ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)")
+    return load_state(config)
+
+
 def revoke_external_monthly_entitlement(
     config: DevConfig,
     *,
