@@ -517,7 +517,7 @@ def _handle_subscription_lifecycle(
     account_config = config_for_account(config, account_id)
     status = _optional_string(subscription, "status")
     subscription_id = _required_string(subscription, "id")
-    inactive_statuses = {"canceled", "unpaid", "incomplete_expired"}
+    inactive_statuses = {"canceled", "past_due", "unpaid", "incomplete_expired"}
     should_revoke = event_type == "customer.subscription.deleted" or status in inactive_statuses
     if should_revoke:
         state = revoke_external_monthly_entitlement(
@@ -614,7 +614,7 @@ def _scheduled_subscription_transition_product_and_period_end(
         return None
     if _object_value(previous_attributes, "items") is None:
         return None
-    if _optional_string(subscription, "status") not in {"active", "trialing", "past_due"}:
+    if _optional_string(subscription, "status") not in {"active", "trialing"}:
         return None
     return _subscription_product_and_period_end(config, subscription)
 

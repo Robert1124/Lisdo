@@ -1692,6 +1692,111 @@ def test_stripe_subscription_deleted_reverts_monthly_plan_but_keeps_topup_record
     assert table.items[(pk, "GRANT#monthlyNonRollover#stripe#basic")]["expiresAt"] == "2026-05-14T12:00:00Z"
 
 
+def test_stripe_subscription_past_due_reverts_monthly_plan_but_keeps_topup_record(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    account_id = "dev-account"
+    pk = f"ACCOUNT#{account_id}"
+    table = dynamodb.Table("lisdo-test-quota")
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "META",
+            "kind": "account",
+            "planId": "monthlyPlus",
+            "userId": "test-user",
+            "stripeCustomerId": "cus_past_due",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#monthlyNonRollover#stripe#plus",
+            "kind": "quotaGrant",
+            "bucket": "monthlyNonRollover",
+            "quantity": 12000,
+            "consumed": 400,
+            "source": "stripe",
+            "productId": "monthlyPlus",
+            "externalEventId": "plus",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "periodEnd": "2026-06-14T12:00:00Z",
+            "stripeCustomerId": "cus_past_due",
+            "stripeSubscriptionId": "sub_past_due",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": pk,
+            "sk": "GRANT#topUpRollover#stripe#topup",
+            "kind": "quotaGrant",
+            "bucket": "topUpRollover",
+            "quantity": 10000,
+            "consumed": 0,
+            "source": "stripe",
+            "productId": "topUpUsage",
+            "externalEventId": "topup",
+            "createdAt": "2026-05-14T12:00:00Z",
+            "stripeCustomerId": "cus_past_due",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": "STRIPE_CUSTOMER#cus_past_due",
+            "sk": "META",
+            "kind": "stripeCustomerIndex",
+            "accountId": account_id,
+            "createdAt": "2026-05-14T12:00:00Z",
+            "updatedAt": "2026-05-14T12:00:00Z",
+        }
+    )
+    past_due_event = {
+        "id": "evt_subscription_past_due_1",
+        "type": "customer.subscription.updated",
+        "data": {
+            "object": {
+                "id": "sub_past_due",
+                "customer": "cus_past_due",
+                "status": "past_due",
+                "metadata": {
+                    "accountId": account_id,
+                    "lisdoProductId": "monthlyPlus",
+                },
+            }
+        },
+    }
+    _install_fake_stripe(monkeypatch, webhook_events=[past_due_event])
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={"monthlyPlus": "price_monthly_plus"},
+    )
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=past_due_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert body["eventType"] == "customer.subscription.updated"
+    assert body["reason"] == "subscription_inactive"
+    assert_quota_snapshot(body["quota"], plan_id="free", monthly_remaining=0, topup_remaining=10000)
+    assert table.items[(pk, "META")]["planId"] == "free"
+    assert table.items[(pk, "GRANT#monthlyNonRollover#stripe#plus")]["expiresAt"] == "2026-05-14T12:00:00Z"
+
+
 def test_stripe_one_time_checkout_webhook_grants_starter_trial(load_lambda_handler, monkeypatch) -> None:
     dynamodb = _install_fake_boto3(monkeypatch)
     handler = load_lambda_handler(
