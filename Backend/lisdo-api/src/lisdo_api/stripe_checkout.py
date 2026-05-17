@@ -520,10 +520,9 @@ def _handle_subscription_lifecycle(
 
 
 def _invoice_product_and_period_end(config: DevConfig, invoice: Any) -> tuple[StripeProduct, str | None]:
-    if _optional_string(invoice, "billing_reason") == "subscription_update":
-        positive_recurring_line = _positive_recurring_invoice_product_and_period_end(config, invoice)
-        if positive_recurring_line is not None:
-            return positive_recurring_line
+    recurring_line = _recurring_invoice_product_and_period_end(config, invoice)
+    if recurring_line is not None:
+        return recurring_line
 
     metadata_product_id = _product_id_from_invoice_metadata(invoice)
     if metadata_product_id is not None:
@@ -535,13 +534,12 @@ def _invoice_product_and_period_end(config: DevConfig, invoice: Any) -> tuple[St
     return _product_for_price(config, price_id), period_end
 
 
-def _positive_recurring_invoice_product_and_period_end(
+def _recurring_invoice_product_and_period_end(
     config: DevConfig,
     invoice: Any,
 ) -> tuple[StripeProduct, str | None] | None:
+    candidates: list[tuple[StripeProduct, str | None, bool]] = []
     for line_item in _invoice_line_items(invoice):
-        if not _invoice_line_amount_is_positive(line_item):
-            continue
         price_id = _price_id_from_invoice_line(line_item)
         if price_id is None:
             continue
@@ -553,8 +551,12 @@ def _positive_recurring_invoice_product_and_period_end(
             continue
         period = _object_value(line_item, "period")
         period_end = _object_value(period, "end")
-        return product, _unix_timestamp_to_iso(period_end)
-    return None
+        candidates.append((product, _unix_timestamp_to_iso(period_end), _invoice_line_amount_is_positive(line_item)))
+    positive_candidate = next((candidate for candidate in candidates if candidate[2]), None)
+    selected = positive_candidate or (candidates[0] if candidates else None)
+    if selected is None:
+        return None
+    return selected[0], selected[1]
 
 
 def _invoice_line_amount_is_positive(line_item: Any) -> bool:

@@ -965,6 +965,99 @@ def test_stripe_subscription_invoice_webhook_accepts_current_invoice_shape(
     assert grants[0]["periodEnd"] == "2026-06-14T12:00:00Z"
 
 
+def test_stripe_subscription_cycle_invoice_prefers_line_price_when_metadata_is_stale(
+    load_lambda_handler,
+    monkeypatch,
+) -> None:
+    dynamodb = _install_fake_boto3(monkeypatch)
+    handler = load_lambda_handler(
+        plan="free",
+        openai_api_key=None,
+        storage="dynamodb",
+        dynamodb_table_name="lisdo-test-quota",
+        stripe_secret_key="sk_test_lisdo",
+        stripe_webhook_secret="whsec_test_lisdo",
+        stripe_prices={
+            "monthlyBasic": "price_monthly_basic",
+            "monthlyPlus": "price_monthly_plus",
+        },
+    )
+    _, auth_body = invoke(
+        handler,
+        "POST",
+        "/v1/auth/apple",
+        body={"identityToken": unsigned_apple_identity_token(subject="stripe-stale-metadata-user")},
+        token=None,
+    )
+    account_id = auth_body["account"]["id"]
+    webhook_event = {
+        "id": "evt_invoice_payment_succeeded_stale_metadata",
+        "type": "invoice.payment_succeeded",
+        "data": {
+            "object": {
+                "id": "in_stale_metadata_123",
+                "customer": "cus_stale_metadata",
+                "billing_reason": "subscription_cycle",
+                "metadata": {},
+                "parent": {
+                    "subscription_details": {
+                        "metadata": {
+                            "accountId": account_id,
+                            "lisdoProductId": "monthlyBasic",
+                        },
+                        "subscription": "sub_stale_metadata",
+                    },
+                    "type": "subscription_details",
+                },
+                "lines": {
+                    "data": [
+                        {
+                            "amount": 999,
+                            "metadata": {
+                                "accountId": account_id,
+                                "lisdoProductId": "monthlyBasic",
+                            },
+                            "period": {"end": 1781438400},
+                            "pricing": {
+                                "price_details": {
+                                    "price": "price_monthly_plus",
+                                },
+                                "type": "price_details",
+                            },
+                            "parent": {
+                                "subscription_item_details": {
+                                    "subscription": "sub_stale_metadata",
+                                    "subscription_item": "si_stale_metadata",
+                                },
+                                "type": "subscription_item_details",
+                            },
+                        }
+                    ]
+                },
+            }
+        },
+    }
+    _install_fake_stripe(monkeypatch, webhook_events=[webhook_event])
+
+    response, body = invoke(
+        handler,
+        "POST",
+        "/v1/stripe/webhook",
+        token=None,
+        body=webhook_event,
+        headers={"Stripe-Signature": "t=123,v1=fake"},
+    )
+
+    assert response["statusCode"] == 200
+    assert body["status"] == "processed"
+    assert_quota_snapshot(body["quota"], plan_id="monthlyPlus", monthly_remaining=12000, topup_remaining=0)
+    table = dynamodb.Table("lisdo-test-quota")
+    grants = _dynamodb_items(table, kind="quotaGrant")
+    assert len(grants) == 1
+    assert grants[0]["productId"] == "monthlyPlus"
+    assert grants[0]["periodEnd"] == "2026-06-14T12:00:00Z"
+
+
 def test_stripe_subscription_update_invoice_prefers_positive_configured_recurring_line(
     load_lambda_handler,
     monkeypatch,
